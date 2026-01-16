@@ -1,17 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <scene version="2.1.0">
-
-
-
-
-
-
 	<integrator type="path" id="elm__0" name="elm__0">
 		<integer name="max_depth" value="12" />
 	</integrator>
-
-
-
 	<bsdf type="itu-radio-material" id="mat-wall" name="mat-wall">
 		<string name="type" value="concrete" /></bsdf>
 	<bsdf type="itu-radio-material" id="mat-roof" name="mat-roof">
