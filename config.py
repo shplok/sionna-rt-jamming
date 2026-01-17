@@ -68,7 +68,7 @@ class WaypointConfig(BaseMotionConfig):
     Configuration for a Waypoint-based strategy.
     """
     waypoints: List[np.ndarray] = field(default_factory=list)
-    velocity: float = 5.0
+    velocity: float = 10.0
     enable_smoothing: bool = True
 
 
@@ -87,9 +87,9 @@ class GraphNavConfig(BaseMotionConfig):
     enable_smoothing: bool = True
     
     # Launcher Parameters
-    num_simulations: int = 100        # How many simulations to run
-    min_path_distance: float = 100.0  # Minimum Euclidean distance between Start and End nodes
-    velocity: float = 1.0              # Constant velocity for the jammer
+    num_simulations: int = 10        # How many simulations to run
+    min_path_distance: float = 250.0  # Minimum Euclidean distance between Start and End nodes
+    velocity: float = 10.0              # Constant velocity for the jammer
 
     precomputed_nodes: Optional[List[np.ndarray]] = None
     precomputed_adjacency: Optional[Dict[int, List[int]]] = None

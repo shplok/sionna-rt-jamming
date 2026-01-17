@@ -67,7 +67,7 @@ def visualize_scene_collisions(obstacles, paths=None, title="Obstacle Validation
     plt.legend()
     plt.show(block=False)
 
-def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, vmin=-160, vmax=-40, filename="jammer_animation.gif", fps=5):
+def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, vmin=-160, vmax=0, filename="jammer_animation.gif", fps=5):
     """
     Creates a 2D GIF showing the dynamic Radio Map + Moving Jammers.
     """
@@ -96,7 +96,7 @@ def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, v
     # 2. Setup Initial RSS Image
     # We use the first frame to initialize the plot
     first_frame = rss_list[0]
-    im = ax.imshow(first_frame, extent=extent, origin='lower', cmap='plasma', vmin=vmin, vmax=vmax, zorder=1) # type: ignore
+    im = ax.imshow(first_frame, extent=extent, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax, zorder=1) # type: ignore
     
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.set_label('RSS (dBm)')

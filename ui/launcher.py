@@ -19,10 +19,10 @@ class LauncherApp:
         self.selected_strategy = tk.StringVar(value=default_strat)
         
         self.time_step_var = tk.DoubleVar(value=self.fixed_dt if self.fixed_dt is not None else 1)
-        self.velocity_var = tk.DoubleVar(value=1.0)
+        self.velocity_var = tk.DoubleVar(value=10.0)
         self.use_variable_duration = tk.BooleanVar(value=False)
-        self.num_simulations_var = tk.IntVar(value=100)
-        self.min_path_distance_var = tk.DoubleVar(value=100.0)
+        self.num_simulations_var = tk.IntVar(value=10)
+        self.min_path_distance_var = tk.DoubleVar(value=250.0)
 
         self.padding_mode = tk.StringVar(value="pad_end")
         self.user_selection: Optional[Dict[str, Any]] = None
@@ -90,7 +90,7 @@ class LauncherApp:
 
         # B. Create Static Bottom Rows (These act as Anchors for ordering)
         
-        # Anchor 1: Padding Mode (Only visible in Scenario)
+        # Anchor 1: Padding Mode
         self.sync_frame = ttk.Frame(self.param_inner, style="Card.TFrame")
         if self.mode == "scenario":
             self.sync_frame.pack(fill=tk.X, pady=(0, 20))
@@ -139,144 +139,6 @@ class LauncherApp:
         spin.pack()
         
         return container, spin, lbl
-
-        # # --- Parameters Card ---
-        # self.param_frame = ttk.LabelFrame(main, text=" Parameters ", style="Card.TLabelframe", padding="15")
-        # self.param_frame.pack(fill=tk.X, pady=(0, 25))
-        
-        # self.param_inner = ttk.Frame(self.param_frame, style="Card.TFrame")
-        # self.param_inner.pack(fill=tk.X, pady=(0, 0))
-
-        # # Checkbox Option
-        # self.opt_container = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # self.opt_container.pack(fill=tk.X, pady=(0, 20))
-
-        # self.chk_var_dur = ttk.Checkbutton(
-        #     self.opt_container, 
-        #     text="Enable Variable Segment Duration", 
-        #     variable=self.use_variable_duration, 
-        #     style="Card.TCheckbutton",
-        #     command=self._update_description
-        # )
-        # self.chk_var_dur.pack(anchor="w")
-
-        # self.desc_label = ttk.Label(
-        #     self.opt_container, 
-        #     text="Standard: Segment duration is strictly multiple of Time Step.",
-        #     style="Desc.TLabel",
-        #     wraplength=400
-        # )
-        # self.desc_label.pack(anchor="w", pady=(6, 0), padx=30)
-
-        # # Velocity Row
-        # self.vel_container = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # ttk.Label(self.vel_container, text="Const. Velocity (m/s):", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
-        
-        # spin_vel = tk.Frame(self.vel_container, bg=self.theme.entry_bg, padx=1, pady=1)
-        # spin_vel.pack(side=tk.RIGHT)
-
-        # tk.Spinbox(
-        #     spin_vel, from_=0, to=100.0, increment=1.0, 
-        #     textvariable=self.velocity_var, width=5,
-        #     bg=self.theme.entry_bg, fg="#ffffff", relief="flat",
-        #     font=self.theme.main_font, buttonbackground=self.theme.panel_color
-        # ).pack()
-
-        # self.dist_container = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # ttk.Label(self.dist_container, text="Min Path Dist (m):", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
-        
-        # spin_dist = tk.Frame(self.dist_container, bg=self.theme.entry_bg, padx=1, pady=1)
-        # spin_dist.pack(side=tk.RIGHT)
-        # tk.Spinbox(
-        #     spin_dist, from_=1, to=1000, increment=10.0, 
-        #     textvariable=self.min_path_distance_var, width=5,
-        #     bg=self.theme.entry_bg, fg="#ffffff", relief="flat",
-        #     font=self.theme.main_font, buttonbackground=self.theme.panel_color
-        # ).pack()
-
-        # # Number of Simulations
-        # self.sim_container = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # ttk.Label(self.sim_container, text="Num Simulations:", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
-        
-        # spin_sim = tk.Frame(self.sim_container, bg=self.theme.entry_bg, padx=1, pady=1)
-        # spin_sim.pack(side=tk.RIGHT)
-        # tk.Spinbox(
-        #     spin_sim, from_=1, to=10000, increment=1, 
-        #     textvariable=self.num_simulations_var, width=5,
-        #     bg=self.theme.entry_bg, fg="#ffffff", relief="flat",
-        #     font=self.theme.main_font, buttonbackground=self.theme.panel_color
-        # ).pack()
-
-        # # Sync Padding Mode
-        # sync_frame = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # sync_frame.pack(fill=tk.X, pady=(0, 20))
-        # ttk.Label(sync_frame, text="Path Padding Mode:", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
-
-        # padding_cb = ttk.Combobox(
-        #     sync_frame, 
-        #     textvariable=self.padding_mode,
-        #     values=["START", "END"],
-        #     state="readonly",
-        #     width=10,
-        #     style="TCombobox"
-        # )
-        # padding_cb.pack(side=tk.RIGHT)
-
-        # # Time Step Row
-        # row_dt = ttk.Frame(self.param_inner, style="Card.TFrame")
-        # row_dt.pack(fill=tk.X, pady=(0, 5))
-        
-        # lbl_dt = ttk.Label(row_dt, text="Time Step (dt):", style="Card.TLabel")
-        # lbl_dt.pack(side=tk.LEFT, anchor="center")
-        
-        # spin_container = tk.Frame(row_dt, bg=self.theme.entry_bg, padx=1, pady=1)
-        # spin_container.pack(side=tk.RIGHT)
-        
-        # self.spin_dt = tk.Spinbox(
-        #     spin_container, 
-        #     from_=0, to=100.0, increment=0.25, 
-        #     textvariable=self.time_step_var,
-        #     width=5,
-        #     bg=self.theme.entry_bg, 
-        #     fg="#ffffff", 
-        #     relief="flat",
-        #     font=("Segoe UI", 13),
-        #     highlightthickness=0,
-        #     buttonbackground=self.theme.panel_color
-        # )
-        # self.spin_dt.pack()
-
-        # if self.fixed_dt is not None:
-        #     self.spin_dt.config(state='disabled', fg="#888888")
-        #     lbl_dt.config(text=f"Time Step (Locked at {self.fixed_dt} s):")
-
-        # # --- Button ---
-        # ttk.Frame(main).pack(expand=True)
-        # btn = ttk.Button(main, text="INITIALIZE SIMULATION", style="Action.TButton", command=self.finish)
-        # btn.pack(side=tk.BOTTOM, fill=tk.X)
-
-        # # Initial UI State
-        # self._on_strategy_change()
-        # self._update_description()
-
-    # def _on_strategy_change(self):
-    #     val = self.selected_strategy.get()
-
-    #     self.opt_container.pack_forget()
-    #     self.vel_container.pack_forget()
-    #     self.sim_container.pack_forget()
-    #     self.dist_container.pack_forget()
-
-    #     target_index = len(self.param_inner.winfo_children()) - 2
-        
-    #     if val == "Math Modeling":
-    #         self.opt_container.pack(fill=tk.X, pady=(0, 20), before=self.param_inner.winfo_children()[target_index])
-    #     elif val == "Waypoint":
-    #         self.vel_container.pack(fill=tk.X, pady=(0, 20), before=self.param_inner.winfo_children()[target_index])
-    #     elif val == "GraphNav":
-    #         self.vel_container.pack(fill=tk.X, pady=(0, 20), before=self.param_inner.winfo_children()[target_index])
-    #         self.dist_container.pack(fill=tk.X, pady=(0, 20), before=self.param_inner.winfo_children()[target_index])
-    #         self.sim_container.pack(fill=tk.X, pady=(0, 20), before=self.param_inner.winfo_children()[target_index])
 
     def _on_strategy_change(self):
         val = self.selected_strategy.get()

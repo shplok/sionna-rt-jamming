@@ -166,8 +166,13 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
     # Initialize Solver
     rm_solver = RadioMapSolver()
 
-    # Storage for animation frames
-    rss_frames = []
+    # --- Storage Initialization ---
+    # 1. List for the Aggregated RSS frames (dBm)
+    aggregated_rss_history = []
+    
+    # 2. Dict for Individual RSS frames (dBm)
+    # Mapping: jammer_name -> list of frames
+    individual_rss_histories = {name: [] for name in scene.transmitters}
 
     tx_power_dbm = 30.0
     tx_power_linear = 10**(tx_power_dbm / 10.0) / 1000.0 # Convert dBm to Watts
@@ -193,29 +198,51 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
                 edge_diffraction=False 
             )
 
-            linear_gain = rm.rss.numpy() # Shape is (Tx, H, W)
+            # linear_gain shape is typically (Tx, H, W)
+            linear_gain = rm.rss.numpy() 
 
+            # Ensure shape consistency if there is only 1 transmitter
             if len(linear_gain.shape) == 2:
-                linear_gain = np.expand_dims(linear_gain, axis=0)  # Ensure Tx dimension exists
+                linear_gain = np.expand_dims(linear_gain, axis=0)
             
-            # The output 'rss_data' is already in Linear Watts (or Path Gain),  NOT dBm. So we just sum it directly.
+            # --- A. Save Aggregated Map ---
             aggregate_rss_watts = np.sum(linear_gain * tx_power_linear, axis=0)
-    
-            # Now convert the SUM to dBm for visualization
-            # Use 1e-20 to avoid log(0) errors
-            rss_data = 10 * np.log10(np.maximum(aggregate_rss_watts, 1e-20)) + 30 # Convert Watts to dBm
+            agg_dbm = 10 * np.log10(np.maximum(aggregate_rss_watts, 1e-20)) + 30 
+            aggregated_rss_history.append(agg_dbm)
 
-            rss_frames.append(rss_data)
+            # --- B. Save Individual Maps ---
+            # Sionna returns results in the order of insertion into `scene.transmitters`
+            # We iterate safely by index
+            tx_names = list(scene.transmitters.keys())
+            
+            for i, name in enumerate(tx_names):
+                # Extract specific slice for this transmitter
+                indiv_watts = linear_gain[i] * tx_power_linear
+                indiv_dbm = 10 * np.log10(np.maximum(indiv_watts, 1e-20)) + 30
+                
+                individual_rss_histories[name].append(indiv_dbm)
 
         except Exception as e:
             raise RuntimeError(f"Error during RadioMap computation at step {step}: {e}")
-    print("\nSimulation Finished.")
+            
 
-    
+    # --- Save RSS Data ---    
+    # 1. Save Aggregated
+    agg_stack = np.array(aggregated_rss_history) # Shape: (T, N, M)
+    np.save(os.path.join(output_dir, "rss_aggregated.npy"), agg_stack)
+
+    # 2. Save Individual
+    for name, frames in individual_rss_histories.items():
+        indiv_stack = np.array(frames) # Shape: (T, N, M)
+        clean_name = name.replace(" ", "_") # Safety for filenames
+        filename = f"rss_{clean_name}.npy"
+        np.save(os.path.join(output_dir, filename), indiv_stack)
+
+    # --- Generate GIF (using aggregated data) ---
     print("Creating summary animation...")
     gif_path = os.path.join(output_dir, "jammer_animation.gif")
     create_jammer_animation(
-        rss_list=rss_frames,
+        rss_list=aggregated_rss_history,
         engine=engine,
         buildings=buildings,
         map_size=map_size,
@@ -235,18 +262,14 @@ def save_dataset(root_dir, dataset_name, paths, metadata=None):
     # Save Items
     for name, data in paths.items():
         # Save Path
-        np.save(os.path.join(save_path, f"{name}.npy"), data)
+        clean_name = name.replace(" ", "_")
+        np.save(os.path.join(save_path, f"path_{clean_name}.npy"), data)
         
         # Save Metadata (if available for this item)
         if metadata and name in metadata:
-            with open(os.path.join(save_path, f"{name}.txt"), "w") as f:
+            with open(os.path.join(save_path, f"meta_{clean_name}.txt"), "w") as f:
                 for k, v in metadata[name].items():
                     f.write(f"{k}: {v}\n")
-    
-    print(f"Data saved to: {save_path}")
 
 if __name__ == "__main__":
     main()
-
-
-
