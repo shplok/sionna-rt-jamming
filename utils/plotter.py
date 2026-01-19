@@ -113,7 +113,7 @@ def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, v
                           label=jid, zorder=5)
         jammer_markers[jid] = marker
     
-    ax.set_title("Jammer Scenario Simulation")
+    ax.set_title("Jammer Simulation")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     # ax.legend(loc='upper right')

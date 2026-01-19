@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 from ui.theme import ModernTheme
 
 class LauncherApp:
-    def __init__(self, jammer_name: str = "Unknown", fixed_dt: Optional[float] = None, mode: str = "scenario"):
+    def __init__(self, jammer_name: str = "Unknown", fixed_dt: Optional[float] = None, mode: str = "individual"):
         self.root = tk.Tk()
         self.root.title("Sionna Motion Engine")
         
@@ -15,7 +15,7 @@ class LauncherApp:
         self.fixed_dt = fixed_dt
         self.mode = mode
         
-        default_strat = "Math Modeling" if self.mode == "scenario" else "GraphNav"
+        default_strat = "Math Modeling" if self.mode == "individual" else "GraphNav"
         self.selected_strategy = tk.StringVar(value=default_strat)
         
         self.time_step_var = tk.DoubleVar(value=self.fixed_dt if self.fixed_dt is not None else 1)
@@ -24,7 +24,7 @@ class LauncherApp:
         self.num_simulations_var = tk.IntVar(value=10)
         self.min_path_distance_var = tk.DoubleVar(value=250.0)
 
-        self.padding_mode = tk.StringVar(value="pad_end")
+        self.padding_mode = tk.StringVar(value="END")
         self.user_selection: Optional[Dict[str, Any]] = None
 
         self._setup_ui()
@@ -52,7 +52,7 @@ class LauncherApp:
         strat_inner = ttk.Frame(strat_frame, style="Card.TFrame")
         strat_inner.pack(fill=tk.X)
 
-        if self.mode == "scenario":
+        if self.mode == "individual":
             strategies = [
                 ("Math Modeling Planner", "Math Modeling"),
                 ("Waypoint Planner", "Waypoint"),
@@ -92,13 +92,12 @@ class LauncherApp:
         
         # Anchor 1: Padding Mode
         self.sync_frame = ttk.Frame(self.param_inner, style="Card.TFrame")
-        if self.mode == "scenario":
-            self.sync_frame.pack(fill=tk.X, pady=(0, 20))
-            ttk.Label(self.sync_frame, text="Path Padding Mode:", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
-            ttk.Combobox(
-                self.sync_frame, textvariable=self.padding_mode, 
-                values=["pad_end", "pad_start"], state="readonly", width=10, style="TCombobox"
-            ).pack(side=tk.RIGHT)
+        self.sync_frame.pack(fill=tk.X, pady=(0, 20))
+        ttk.Label(self.sync_frame, text="Path Padding Mode:", style="Card.TLabel").pack(side=tk.LEFT, anchor="center")
+        ttk.Combobox(
+            self.sync_frame, textvariable=self.padding_mode, 
+            values=["END", "START"], state="readonly", width=10, style="TCombobox"
+        ).pack(side=tk.RIGHT)
 
         # Anchor 2: Time Step (Always visible at bottom)
         # We capture the frame, spinbox, and label to apply logic later
@@ -111,7 +110,7 @@ class LauncherApp:
 
         # --- Finish Button ---
         ttk.Frame(main).pack(expand=True)
-        btn_text = "INITIALIZE SIMULATION" if self.mode == "scenario" else "GENERATE DATASET"
+        btn_text = "INITIALIZE SIMULATION" if self.mode == "individual" else "GENERATE DATASET"
         ttk.Button(main, text=btn_text, style="Action.TButton", command=self.finish).pack(side=tk.BOTTOM, fill=tk.X)
 
         self._on_strategy_change()
@@ -149,26 +148,18 @@ class LauncherApp:
         self.sim_container.pack_forget()
         self.dist_container.pack_forget()
 
-        # 2. Determine Anchor (We pack dynamic widgets BEFORE this widget)
-        # In Scenario Mode, 'sync_frame' is the top-most static widget at the bottom.
-        # In Batch Mode, 'sync_frame' is not packed, so 'row_dt' is the top-most static widget.
-        if self.mode == "scenario":
-            anchor = self.sync_frame
-        else:
-            anchor = self.row_dt
-
         # 3. Pack Dynamic Widgets relative to Anchor
         if val == "Math Modeling":
-            self.opt_container.pack(fill=tk.X, pady=(0, 20), before=anchor)
+            self.opt_container.pack(fill=tk.X, pady=(0, 20), before=self.sync_frame)
             
         elif val == "Waypoint":
-            self.vel_container.pack(fill=tk.X, pady=(0, 20), before=anchor)
+            self.vel_container.pack(fill=tk.X, pady=(0, 20), before=self.sync_frame)
             
         elif val == "GraphNav":
             # Order: Velocity -> Distance -> Sims
-            self.vel_container.pack(fill=tk.X, pady=(0, 20), before=anchor)
-            self.dist_container.pack(fill=tk.X, pady=(0, 20), before=anchor)
-            self.sim_container.pack(fill=tk.X, pady=(0, 20), before=anchor)
+            self.vel_container.pack(fill=tk.X, pady=(0, 20), before=self.sync_frame)
+            self.dist_container.pack(fill=tk.X, pady=(0, 20), before=self.sync_frame)
+            self.sim_container.pack(fill=tk.X, pady=(0, 20), before=self.sync_frame)
 
 
     def _update_description(self):

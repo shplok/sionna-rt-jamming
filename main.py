@@ -11,6 +11,7 @@ from utils.plotter import create_jammer_animation
 
 from core.engine import MotionEngine
 from ui.app_controller import MissionController
+from ui.menu import MenuApp
 from core.strategies import GraphNavStrategy 
 
 def main():
@@ -27,10 +28,10 @@ def main():
     scene.frequency = FREQ_HZ
     buildings = gather_bboxes(MESHES_PATH)
 
-    # --- 3. Define Transmitters Config (for scenario mode) ---
+    # --- 3. Define Transmitters Config (for individual mode) ---
     transmitters_config = [
         {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT])},
-        {"name": "Jammer2", "position": np.array([-200, 200, Z_HEIGHT])}
+        {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT])}
     ]
 
     map_bounds = {'x': [-600, 600], 'y': [-600, 600], 'z': [Z_HEIGHT, Z_HEIGHT]}
@@ -44,25 +45,24 @@ def main():
     )
     
     engine = MotionEngine(scene=scene, obstacles=buildings, bounds=map_bounds)
-    # --- 5. User Selection ---
-    print("\n" + "="*40 + "\n SIONNA MOTION ENGINE\n" + "="*40)
-    print("1. Scenario Design (Configure paths -> Run Simulation)")
-    print("2. Batch Dataset Generation (Generate N random paths)")
-    mode = input("\nEnter choice [1/2]: ").strip()
 
-    if mode == "1":
+    # --- 5. User Selection ---
+    menu = MenuApp()
+    mode = menu.run()
+    
+    if mode == "individual":
         # Pass the config so we can spawn them inside this function
-        run_scenario_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings)
-    elif mode == "2":
+        run_individual_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings)
+    elif mode == "batch":
         # Batch mode doesn't need the default config, it makes its own
         run_batch_mode(engine, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings, Z_HEIGHT)
     else:
-        print("Invalid selection. Exiting.")
+        raise RuntimeError("No valid mode selected. Exiting.")
 
-def run_scenario_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings):
+def run_individual_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings):
     """Configures specific paths for each jammer, saves them, then runs Sionna simulation."""
     
-    print("Spawning Scenario Transmitters...")
+    print("Spawning individual Transmitters...")
     for tx_info in transmitters_config:
         if tx_info["name"] not in scene.transmitters:
             tx = Transmitter(
@@ -81,7 +81,7 @@ def run_scenario_mode(engine, transmitters_config, scene, map_center, map_size, 
         print(f"--- Configuring {j_id} ---")
         
         controller = MissionController(engine, j_id, tx['position'], fixed_dt=global_dt)
-        path, metadata = controller.run(mode="scenario")
+        path, metadata = controller.run(mode="individual")
         
         if path is None:
             print(f"Setup cancelled for {j_id}. Exiting.")
@@ -103,20 +103,12 @@ def run_batch_mode(engine, scene, map_center, map_size, cell_size, output_dir, d
     """Generates N paths, ADDS them as new jammers to the scene, and runs one massive simulation."""
     
     # 1. Configure Graph
-    controller = MissionController(engine, "BatchGenerator", np.array([0,0,z_height]))
-    _, metadata = controller.run(mode="batch")
+    controller = MissionController(engine, "BatchGenerator")
+    config, padding_mode = controller.batch_run()
+
+    if config is None:
+        raise RuntimeError("Batch setup was cancelled. Exiting.")
     
-    if "BatchGenerator" in engine._jammer_paths:
-        del engine._jammer_paths["BatchGenerator"]
-    if "BatchGenerator" in engine._jammer_metadata:
-        del engine._jammer_metadata["BatchGenerator"]
-    # ---------------------------------------------------
-
-    if "graph_config" not in metadata:
-        print("Batch setup cancelled.")
-        return
-
-    config = metadata["graph_config"]
     num_paths = config.num_simulations
     print(f"\nGenerating {num_paths} paths (to be used as simultaneous jammers)...")
     
@@ -133,6 +125,7 @@ def run_batch_mode(engine, scene, map_center, map_size, cell_size, output_dir, d
             # A. Add Path to Engine
             engine._jammer_paths[jammer_name] = path
             engine._jammer_metadata[jammer_name] = {"strategy": "GraphNav_Batch"}
+            engine.set_padding_mode(jammer_name, padding_mode)
             
             # B. Add Physical Transmitter to Scene
             if jammer_name not in scene.transmitters:

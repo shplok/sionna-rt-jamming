@@ -257,6 +257,7 @@ class GraphPlannerGUI:
                             self.adjacency[j].append(int(i))
 
         self._draw_environment()
+        self.root.config(cursor="")
 
     def on_close_window(self):
         """Handle the user clicking the 'X' button."""
