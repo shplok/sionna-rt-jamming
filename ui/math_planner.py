@@ -133,9 +133,6 @@ class MathPlannerGUI:
         self.ax.grid(True, alpha=0.3)
         self.ax.set_aspect('equal', adjustable='datalim')
 
-        rects = []
-        all_x, all_y = [], []
-
         patches = []
         for obs in self.engine.obstacles:
             if "footprint" in obs and obs["footprint"]:
@@ -151,13 +148,13 @@ class MathPlannerGUI:
             pc = PatchCollection(patches, facecolor='#444444', alpha=0.7, edgecolor=None)
             self.ax.add_collection(pc)
         
-        if all_x:
-            pad = 50
-            self.ax.set_xlim(min(all_x)-pad, max(all_x)+pad)
-            self.ax.set_ylim(min(all_y)-pad, max(all_y)+pad)
+        b = self.engine.bounds
+        if b:
+            self.ax.set_xlim(b['x'][0], b['x'][1])
+            self.ax.set_ylim(b['y'][0], b['y'][1])
         else:
-            self.ax.set_xlim(-200, 200)
-            self.ax.set_ylim(-200, 200)
+            self.ax.set_xlim(-500, 500)
+            self.ax.set_ylim(-500, 500)
             
         self.ax.plot(self.start_pos[0], self.start_pos[1], 'o', color='#00cc00', markersize=8, label='Start')
 

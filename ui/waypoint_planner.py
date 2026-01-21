@@ -139,9 +139,6 @@ class WaypointPlannerGUI:
         self.ax.set_title(f"Waypoint Planner (Vel: {self.config.velocity} m/s)", color="white")
         self.ax.grid(True, alpha=0.2)
         self.ax.set_aspect('equal')
-        
-        all_x, all_y = [], []
-        rects = [] # List to hold patch objects
 
         # 1. Gather and draw obstacles
         patches = []
@@ -164,14 +161,13 @@ class WaypointPlannerGUI:
         all_x.append(self.start_pos[0]) # type: ignore
         all_y.append(self.start_pos[1]) # type: ignore
         
-        # Auto-scale limits based on content + padding
-        if all_x:
-            pad = 50
-            self.ax.set_xlim(min(all_x)-pad, max(all_x)+pad)
-            self.ax.set_ylim(min(all_y)-pad, max(all_y)+pad)
+        b = self.engine.bounds
+        if b:
+            self.ax.set_xlim(b['x'][0], b['x'][1])
+            self.ax.set_ylim(b['y'][0], b['y'][1])
         else:
-            self.ax.set_xlim(-200, 200)
-            self.ax.set_ylim(-200, 200)
+            self.ax.set_xlim(-500, 500)
+            self.ax.set_ylim(-500, 500)
 
         self.path_line, = self.ax.plot([], [], '-', color='#4cc2ff', lw=2, markersize=4)
         self.control_points, = self.ax.plot([], [], 'o', color='#4cc2ff', markersize=4, alpha=0.6)

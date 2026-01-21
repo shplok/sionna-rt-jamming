@@ -18,8 +18,8 @@ def main():
     # --- 1. Global Setup ---
     # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
     # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
-    SCENE_PATH = r"./source_data/NYC_585751_4512036/simple_OSM_scene.xml"
-    MESHES_PATH = r"./source_data/NYC_585751_4512036/mesh"
+    SCENE_PATH = r"./data/NYC_585751_4512036/simple_OSM_scene.xml"
+    MESHES_PATH = r"./data/NYC_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
     DATASET_NAME = "NYC"
     FREQ_HZ = 1.57542e9
@@ -36,9 +36,9 @@ def main():
         {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT])}
     ]
 
-    b = 750
+    b = 750 # half-length of map area
     map_bounds = {'x': [-b, b], 'y': [-b, b], 'z': [Z_HEIGHT, Z_HEIGHT]}
-    cell_size = (10, 10)
+    cell_size = (10, 10) # resolution of radio map grid
 
     # --- 4. Static Scene Setup ---
     map_center, map_size = create_scene_objects(
@@ -191,7 +191,8 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
                 size=[map_size[0], map_size[1]],    # Total size of the radio map #type: ignore
                 orientation=[0, 0, 0],              # Horizontal orientation (Z-up) #type: ignore
                 diffraction=True,
-                edge_diffraction=False 
+                edge_diffraction=True,
+                refraction=True
             )
 
             # linear_gain shape is typically (Tx, H, W)
