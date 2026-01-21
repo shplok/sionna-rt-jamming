@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk # type: ignore
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Polygon
 from matplotlib.collections import PatchCollection
 from typing import List, Any
 
@@ -125,7 +125,7 @@ class WaypointPlannerGUI:
         self.canvas.mpl_connect('scroll_event', self._on_scroll)
         
         # Initial Draw
-        self._draw_static_environment()
+        self._draw_environment()
         
         # Dynamic Artists
         self.path_line, = self.ax.plot([], [], '-', color='#4cc2ff', lw=2, markersize=4)
@@ -134,7 +134,7 @@ class WaypointPlannerGUI:
         self.preview_line, = self.ax.plot([], [], '--', color='#00ff00', lw=1)
         self.error_text = self.ax.text(0.02, 0.98, "", transform=self.ax.transAxes, color='red', fontweight='bold', va='top')
 
-    def _draw_static_environment(self):
+    def _draw_environment(self):
         self.ax.clear()
         self.ax.set_title(f"Waypoint Planner (Vel: {self.config.velocity} m/s)", color="white")
         self.ax.grid(True, alpha=0.2)
@@ -143,19 +143,20 @@ class WaypointPlannerGUI:
         all_x, all_y = [], []
         rects = [] # List to hold patch objects
 
-        # 1. Gather Rectangles (Do not add to ax yet)
+        # 1. Gather and draw obstacles
+        patches = []
         for obs in self.engine.obstacles:
-            mn, mx = obs['min'], obs['max']
-            # Create rectangle
-            r = Rectangle((mn[0], mn[1]), mx[0]-mn[0], mx[1]-mn[1])
-            rects.append(r)
+            if "footprint" in obs and obs["footprint"]:
+                p = Polygon(obs["footprint"], closed=True)
+                patches.append(p)
+            else:
+                # FALLBACK TO BBOX
+                mn, mx = obs['min'], obs['max']
+                r = Rectangle((mn[0], mn[1]), mx[0]-mn[0], mx[1]-mn[1])
+                patches.append(r)
             
-            all_x.extend([mn[0], mx[0]])
-            all_y.extend([mn[1], mx[1]])
-            
-        # 2. Use PatchCollection for high performance rendering
-        if rects:
-            pc = PatchCollection(rects, facecolor='#444444', alpha=0.7, edgecolor=None)
+        if patches:
+            pc = PatchCollection(patches, facecolor='#444444', alpha=0.7, edgecolor=None)
             self.ax.add_collection(pc)
             
         # Draw Start

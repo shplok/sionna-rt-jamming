@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple, Any, Optional
 
 from config import BaseMotionConfig
 from core.strategies import MotionStrategy
+from matplotlib.path import Path
 
 class MotionEngine:
     """
@@ -17,12 +18,22 @@ class MotionEngine:
         self.obstacles = obstacles if obstacles is not None else []
         
         if self.obstacles:
-            # Create (N, 3) arrays for min and max coordinates
+            # 1. Broad Phase Data: (N, 3) arrays for min and max coordinates
             self._obs_min = np.array([o['min'] for o in self.obstacles])
             self._obs_max = np.array([o['max'] for o in self.obstacles])
+
+            # 2. Narrow Phase Data: Pre-compute Polygon Paths
+            self._polygons = []
+            for o in self.obstacles:
+                if "footprint" in o and o["footprint"]:
+                    # Create a Path object for fast 'contains_point' checks
+                    self._polygons.append(Path(o["footprint"]))
+                else:
+                    self._polygons.append(None)
         else:
             self._obs_min = np.empty((0, 3))
             self._obs_max = np.empty((0, 3))
+            self._polygons = []
 
         # Internal storage
         self._jammer_paths: Dict[str, np.ndarray] = {}
@@ -47,16 +58,35 @@ class MotionEngine:
         if self._obs_min.shape[0] == 0:
             return True
         
-        # A point is inside a box if: point >= min AND point <= max (for all x,y,z)
-        inside_mask = np.all(
+        # --- BROAD PHASE: Vectorized AABB Check ---
+        # A point is potentially inside if: point >= min AND point <= max
+        # This checks X, Y, and Z simultaneously.
+        potential_collisions = np.all(
             (position >= self._obs_min) & (position <= self._obs_max), 
             axis=1
         )
         
-        # If inside_mask is True for any building, it's a collision
-        if np.any(inside_mask):
-            return False
+        # If no AABB intersections, we are strictly safe
+        if not np.any(potential_collisions):
+            return True
+
+        # --- NARROW PHASE: Detailed Polygon Check ---
+        # Only check the specific obstacles that passed the broad phase
+        candidate_indices = np.where(potential_collisions)[0]
+        
+        for idx in candidate_indices:
+            poly = self._polygons[idx]
+            
+            # Case A: Legacy/Fallback (No footprint data)
+            # If we hit the AABB and have no polygon, assume collision.
+            if poly is None:
+                return False
                 
+            # Case B: Precise Polygon Check
+            # Check if (x, y) is inside the 2D footprint
+            if poly.contains_point(position[:2]):
+                return False
+        
         return True
 
     def generate_path(self, 

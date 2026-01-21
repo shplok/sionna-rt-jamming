@@ -86,7 +86,7 @@ class LauncherApp:
 
         self.vel_container, _, _ = self._create_spin_row("Const. Velocity (m/s):", self.velocity_var, 0, 100, 1.0)
         self.dist_container, _, _ = self._create_spin_row("Min Path Dist (m):", self.min_path_distance_var, 1, 1000, 10.0)
-        self.sim_container, _, _ = self._create_spin_row("Number of Simulations:", self.num_simulations_var, 1, 10000, 1)
+        self.sim_container, _, _ = self._create_spin_row("Number of Jammers:", self.num_simulations_var, 1, 10000, 1)
 
         # B. Create Static Bottom Rows (These act as Anchors for ordering)
         

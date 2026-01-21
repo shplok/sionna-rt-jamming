@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk  # type: ignore
-from matplotlib.patches import Rectangle, Arrow
+from matplotlib.patches import Rectangle, Arrow, Polygon
 from matplotlib.collections import PatchCollection
 
 from config import MathModelingConfig, MathSegment
@@ -36,7 +36,7 @@ class MathPlannerGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
         
         # --- Kinematic State (Current "Head" of the path) ---
-        self.start_pos = config.starting_position.copy()
+        self.start_pos = config.starting_position.copy() # type: ignore
         
         # Current state trackers
         self.curr_pos = self.start_pos.copy()
@@ -112,7 +112,7 @@ class MathPlannerGUI:
         self.canvas.mpl_connect('button_release_event', self._on_release)
         self.canvas.mpl_connect('motion_notify_event', self._on_drag)
 
-        self._draw_static_environment()
+        self._draw_environment()
         
         # Dynamic Actors
         self.preview_line, = self.ax.plot([], [], '--', lw=2, label='Preview', color='#00ff00')
@@ -126,7 +126,7 @@ class MathPlannerGUI:
         )
         self.ax.legend(loc='lower right', facecolor=self.theme.panel_color, edgecolor=self.theme.fg_color)
 
-    def _draw_static_environment(self):
+    def _draw_environment(self):
         self.ax.set_title("Mission Planner", color=self.theme.fg_color)
         self.ax.set_xlabel("X (m)")
         self.ax.set_ylabel("Y (m)")
@@ -136,17 +136,19 @@ class MathPlannerGUI:
         rects = []
         all_x, all_y = [], []
 
-        if self.engine.obstacles:
-            for obs in self.engine.obstacles:
-                min_pt, max_pt = obs['min'], obs['max']
-                               
-                rects.append(Rectangle((min_pt[0], min_pt[1]), max_pt[0]-min_pt[0], max_pt[1]-min_pt[1]))
-
-                all_x.extend([min_pt[0], max_pt[0]])
-                all_y.extend([min_pt[1], max_pt[1]])
+        patches = []
+        for obs in self.engine.obstacles:
+            if "footprint" in obs and obs["footprint"]:
+                p = Polygon(obs["footprint"], closed=True)
+                patches.append(p)
+            else:
+                # FALLBACK TO BBOX
+                mn, mx = obs['min'], obs['max']
+                r = Rectangle((mn[0], mn[1]), mx[0]-mn[0], mx[1]-mn[1])
+                patches.append(r)
             
-        if rects:
-            pc = PatchCollection(rects, facecolor='#444444', alpha=0.6, edgecolor='#555555')
+        if patches:
+            pc = PatchCollection(patches, facecolor='#444444', alpha=0.7, edgecolor=None)
             self.ax.add_collection(pc)
         
         if all_x:

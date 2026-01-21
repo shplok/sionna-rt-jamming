@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk # type: ignore
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Polygon
 from matplotlib.collections import LineCollection, PatchCollection
 from scipy.spatial import KDTree
 import collections
@@ -143,14 +143,19 @@ class GraphPlannerGUI:
         self.ax.grid(True, alpha=0.2)
         self.ax.set_aspect('equal')
 
-        rects = []
+        patches = []
         for obs in self.engine.obstacles:
-            mn, mx = obs['min'], obs['max']
-            r = Rectangle((mn[0], mn[1]), mx[0]-mn[0], mx[1]-mn[1])
-            rects.append(r)
+            if "footprint" in obs and obs["footprint"]:
+                p = Polygon(obs["footprint"], closed=True)
+                patches.append(p)
+            else:
+                # FALLBACK TO BBOX
+                mn, mx = obs['min'], obs['max']
+                r = Rectangle((mn[0], mn[1]), mx[0]-mn[0], mx[1]-mn[1])
+                patches.append(r)
             
-        if rects:
-            pc = PatchCollection(rects, facecolor='#444444', alpha=0.7, edgecolor=None)
+        if patches:
+            pc = PatchCollection(patches, facecolor='#444444', alpha=0.7, edgecolor=None)
             self.ax.add_collection(pc)
             
         if self.nodes:

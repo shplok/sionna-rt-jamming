@@ -82,16 +82,28 @@ def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, v
     
     # 1. Draw Static Buildings (Gray Rectangles)
     for b in buildings:
-        min_pos = b['min']
-        max_pos = b['max']
-        width = max_pos[0] - min_pos[0]
-        height = max_pos[1] - min_pos[1]
-        
-        rect = patches.Rectangle(
-            (min_pos[0], min_pos[1]), width, height,
-            linewidth=1, edgecolor='black', facecolor='gray', alpha=0.3, zorder=2
-        )
-        ax.add_patch(rect)
+
+        if "footprint" in b and len(b["footprint"]) > 2:
+            patch = patches.Polygon(
+                b["footprint"],
+                closed=True,
+                linewidth=1,
+                edgecolor='black',
+                facecolor='gray',
+                alpha=0.3,
+                zorder=2
+            )
+        else:
+            min_pos = b['min']
+            max_pos = b['max']
+            width = max_pos[0] - min_pos[0]
+            height = max_pos[1] - min_pos[1]
+            
+            patch = patches.Rectangle(
+                (min_pos[0], min_pos[1]), width, height,
+                linewidth=1, edgecolor='black', facecolor='gray', alpha=0.3, zorder=2
+            )
+        ax.add_patch(patch)
     
     # 2. Setup Initial RSS Image
     # We use the first frame to initialize the plot
@@ -116,6 +128,8 @@ def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, v
     ax.set_title("Jammer Simulation")
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
+    ax.set_xlim(extent[0], extent[1])
+    ax.set_ylim(extent[2], extent[3])
     # ax.legend(loc='upper right')
 
     # 4. Update Function for Animation

@@ -16,10 +16,12 @@ from core.strategies import GraphNavStrategy
 
 def main():
     # --- 1. Global Setup ---
-    SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/data/downtown_chicago_luis/ChicagoMarionaClean.xml"
-    MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/data/downtown_chicago_luis/meshes"
+    # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
+    # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
+    SCENE_PATH = r"./source_data/NYC_585751_4512036/simple_OSM_scene.xml"
+    MESHES_PATH = r"./source_data/NYC_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "dataset_test"
+    DATASET_NAME = "NYC"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
 
@@ -34,7 +36,8 @@ def main():
         {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT])}
     ]
 
-    map_bounds = {'x': [-600, 600], 'y': [-600, 600], 'z': [Z_HEIGHT, Z_HEIGHT]}
+    b = 750
+    map_bounds = {'x': [-b, b], 'y': [-b, b], 'z': [Z_HEIGHT, Z_HEIGHT]}
     cell_size = (10, 10)
 
     # --- 4. Static Scene Setup ---
