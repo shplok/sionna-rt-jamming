@@ -1,3 +1,0 @@
-[submodule "data/sionna_osm"]
-	path = data/sionna_osm
-	url = https://github.com/manoj-kumar-joshi/sionna_osm_scene.git
