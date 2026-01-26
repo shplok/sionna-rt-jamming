@@ -158,8 +158,6 @@ class WaypointPlannerGUI:
             
         # Draw Start
         self.ax.plot(self.start_pos[0], self.start_pos[1], 'D', color='#00cc00', markersize=8, label="Start") # type: ignore
-        all_x.append(self.start_pos[0]) # type: ignore
-        all_y.append(self.start_pos[1]) # type: ignore
         
         b = self.engine.bounds
         if b:

@@ -18,10 +18,10 @@ def main():
     # --- 1. Global Setup ---
     # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
     # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
-    SCENE_PATH = r"./data/NYC_585751_4512036/simple_OSM_scene.xml"
-    MESHES_PATH = r"./data/NYC_585751_4512036/mesh"
+    SCENE_PATH = r"./data/NYC1.5KM_585751_4512036/simple_OSM_scene.xml"
+    MESHES_PATH = r"./data/NYC1.5KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "NYC"
+    DATASET_NAME = "NYC_1.5KM_individual"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
 

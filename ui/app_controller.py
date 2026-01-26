@@ -4,8 +4,8 @@ from typing import Optional, Tuple, Dict
 
 # Imports from core
 from core.engine import MotionEngine
-from core.strategies import MathStrategy, RandomWalkStrategy, WaypointStrategy, GraphNavStrategy
-from config import MathModelingConfig, RandomWalkConfig, WaypointConfig, GraphNavConfig
+from core.strategies import MathStrategy, WaypointStrategy, GraphNavStrategy
+from config import MathModelingConfig, WaypointConfig, GraphNavConfig
 
 # Imports from UI
 from ui.launcher import LauncherApp
@@ -55,9 +55,6 @@ class MissionController:
         
         elif strategy_type == "Waypoint":
             path, metadata = self._run_waypoint_workflow(dt, selection["velocity"])
-            
-        elif strategy_type == "RandomWalk":
-            path, metadata = self._run_random_workflow(dt)
         
         elif strategy_type == "GraphNav":
             raise RuntimeError("GraphNav strategy must be run in Batch Mode via batch_run().")
@@ -158,49 +155,4 @@ class MissionController:
         config.waypoints = app.get_waypoints()
         
         strategy = WaypointStrategy()
-        return self.engine.generate_path(self.jammer_id, strategy, config)
-    
-    # def _run_graph_workflow(self, dt: float, num_sims: int, min_path_dist: float, velocity: float):
-    #     # 1. Setup Config
-    #     config = GraphNavConfig(
-    #         strategy_type="GraphNav",
-    #         time_step=dt,
-    #         num_simulations=num_sims,
-    #         min_path_distance=min_path_dist,
-    #         velocity=velocity,
-    #     )
-        
-    #     # 2. Run GUI to build graph
-    #     root = tk.Tk()
-    #     root.title("Graph Navigation Planner")
-    #     app = GraphPlannerGUI(root, self.engine, config)
-    #     root.mainloop()
-        
-    #     # 3. Retrieve finalized config (with graph data)
-    #     final_config = app.get_config_updates()
-    #     final_config.num_simulations = num_sims # Ensure this comes from launcher
-        
-    #     strategy = GraphNavStrategy()
-        
-    #     # We return the sample path + the config in metadata so Main can use it
-    #     try:
-    #         sample_path, sample_meta = self.engine.generate_path(self.jammer_id, strategy, final_config)
-    #         sample_meta["graph_config"] = final_config
-    #         return sample_path, sample_meta
-    #     except Exception as e:
-    #         print(f"Graph generation failed or cancelled: {e}")
-    #         return None, {}
-    
-    def _run_random_workflow(self, dt: float):
-        # A. Build Config (No GUI needed for Random Walk)
-        config = RandomWalkConfig(
-            strategy_type="Random",
-            time_step=dt,
-            starting_position=self.start_pos,
-            num_steps=500, # Could be parameterized in Launcher if desired
-            step_size=1.0
-        )
-        
-        # B. Execute
-        strategy = RandomWalkStrategy()
         return self.engine.generate_path(self.jammer_id, strategy, config)

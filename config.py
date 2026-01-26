@@ -18,20 +18,6 @@ class BaseMotionConfig:
     output_path: Optional[str] = None
 
 # ==========================================
-# 1. Random Walk Configuration
-# ==========================================
-
-@dataclass
-class RandomWalkConfig(BaseMotionConfig):
-    """
-    Configuration specific to the Stochastic/Random Walk strategy.
-    """
-    num_steps: int = 500
-    step_size: float = 1.0
-    max_retries: int = 10
-    random_seed: Optional[int] = None
-
-# ==========================================
 # 2. Math Modeling Configuration
 # ==========================================
 

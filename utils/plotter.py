@@ -83,7 +83,7 @@ def create_jammer_animation(rss_list, engine, buildings, map_size, map_center, v
     # 1. Draw Static Buildings (Gray Rectangles)
     for b in buildings:
 
-        if "footprint" in b and len(b["footprint"]) > 2:
+        if "footprint" in b and not b['footprint'] is None and len(b["footprint"]) > 2:
             patch = patches.Polygon(
                 b["footprint"],
                 closed=True,

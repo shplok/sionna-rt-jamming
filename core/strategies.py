@@ -1,11 +1,9 @@
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Tuple, Dict, Any, List
-from config import BaseMotionConfig, RandomWalkConfig, MathModelingConfig, WaypointConfig, GraphNavConfig, MathSegment
+from typing import Tuple, Dict, Any
+from config import BaseMotionConfig, MathModelingConfig, WaypointConfig, GraphNavConfig, MathSegment
 from core.utils import calculate_smooth_path, a_star_search
-from scipy.spatial import KDTree
 import collections
-import os
 
 class MotionStrategy(ABC):
     """
@@ -24,66 +22,6 @@ class MotionStrategy(ABC):
             (path, metadata): (N,3) position array and metadata dict.
         """
         pass
-
-# ==========================================
-# 1. Random Walk Strategy
-# ==========================================
-
-class RandomWalkStrategy(MotionStrategy):
-    """
-    Generates a stochastic path that strictly avoids obstacles defined in the engine.
-    """
-    def generate(self, engine: Any, config: RandomWalkConfig) -> Tuple[np.ndarray, Dict]: # type: ignore
-        # 1. Setup
-        if config.random_seed is not None:
-            np.random.seed(config.random_seed)
-
-        path = np.zeros((config.num_steps, 3))
-        path[0] = config.starting_position
-        
-        # We assume movement is primarily on the XY plane, preserving initial Z
-        z_height = config.starting_position[2] # type: ignore
-
-        # 2. Iterative Step Generation
-        for step in range(1, config.num_steps):
-            previous_position = path[step - 1]
-            valid_step_found = False
-            
-            for _ in range(config.max_retries):
-                # Generate random direction in XY plane
-                direction = np.random.randn(2)
-                norm = np.linalg.norm(direction)
-                if norm > 0:
-                    direction /= norm
-                
-                # Create candidate
-                offset = np.array([direction[0], direction[1], 0.0]) * config.step_size
-                candidate_position = previous_position + offset
-                candidate_position[2] = z_height 
-                
-                # Check against engine's world truth (obstacles/bounds)
-                if engine.is_position_valid(candidate_position):
-                    path[step] = candidate_position
-                    valid_step_found = True
-                    break
-            
-            # Fallback: if stuck, stay in place
-            if not valid_step_found:
-                path[step] = previous_position
-
-        # 3. Calculate Metadata
-        # (Vectorized calculation of distance)
-        diffs = np.diff(path, axis=0)
-        total_distance = np.sum(np.linalg.norm(diffs, axis=1))
-        
-        metadata = {
-            "strategy": "RandomWalk",
-            "total_distance": total_distance,
-            "avg_velocity": config.step_size / config.time_step,
-            "duration": config.num_steps * config.time_step
-        }
-        
-        return path, metadata
 
 # ==========================================
 # 2. Math Modeling Strategy

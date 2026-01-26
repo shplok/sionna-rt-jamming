@@ -56,7 +56,6 @@ class LauncherApp:
             strategies = [
                 ("Math Modeling Planner", "Math Modeling"),
                 ("Waypoint Planner", "Waypoint"),
-                ("Random Walk Planner", "RandomWalk"),
             ]
         else:
             strategies = [("Graph Navigation", "GraphNav")]
