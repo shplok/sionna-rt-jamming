@@ -18,10 +18,12 @@ from core.strategies import GraphNavStrategy
 
 def main():
     # --- 1. Global Setup ---
-    SCENE_PATH = r"./data/NYC1.5KM_585751_4512036/simple_OSM_scene.xml"
-    MESHES_PATH = r"./data/NYC1.5KM_585751_4512036/mesh"
+    # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
+    # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
+    SCENE_PATH = r"./data/NYC3KM_585751_4512036/simple_OSM_scene.xml"
+    MESHES_PATH = r"./data/NYC3KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "NYC_1.5KM_singlejammer"
+    DATASET_NAME = "NYC"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
     GLOBAL_TX_POWER_DBW = 10.0
@@ -34,11 +36,12 @@ def main():
 
     # --- 3. Define Transmitters Config (for individual mode) ---
     transmitters_config = [
-        {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM},
-        {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM}
+        {"name": "Jammer2", "position": np.array([106, -473, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM}
+        # {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT])},
+        # {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT])}
     ]
 
-    b = 750 # half-length of map area
+    b = 750
     map_bounds = {'x': [-b, b], 'y': [-b, b], 'z': [Z_HEIGHT, Z_HEIGHT]}
     cell_size = (8, 8) # resolution of radio map grid
 
@@ -212,7 +215,6 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
             # Add the noise floor in Watts before converting to dBW
             agg_dbw = 10 * np.log10(aggregate_rss_watts + NOISE_FLOOR_WATTS) 
             aggregated_rss_history.append(agg_dbw)
-
             # --- B. Save Individual Maps ---
             # Sionna returns results in the order of insertion into `scene.transmitters`
             # We iterate safely by index
