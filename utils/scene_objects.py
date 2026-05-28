@@ -1,8 +1,6 @@
-import sionna.rt as rt
 import os
 import numpy as np
 import trimesh
-from collections import defaultdict
 
 def create_scene_objects(
     scene,
@@ -14,7 +12,8 @@ def create_scene_objects(
     """
     Configures static scene elements: Antenna arrays, map boundaries, and center.
     """
-    
+    import sionna.rt as rt
+
     # 1. Setup Arrays (Global config)
     scene.tx_array = rt.PlanarArray(**tx_array_args)
     scene.rx_array = rt.PlanarArray(**rx_array_args)
@@ -29,7 +28,16 @@ def create_scene_objects(
 
     return map_center, (map_width, map_height)
 
-def gather_bboxes(mesh_dir):
+def gather_bboxes(mesh_dir, footprints=True):
+    """
+    Load building obstacles from PLY meshes.
+
+    footprints=True (default): slice meshes for polygon footprints (slow, used by planners).
+    footprints=False: axis-aligned bounds only (faster, fine for visualization).
+    """
+    if not os.path.isdir(mesh_dir):
+        raise FileNotFoundError(f"Mesh directory not found: {mesh_dir}")
+
     obstacles = []
     
     # Get all .ply files
@@ -38,30 +46,37 @@ def gather_bboxes(mesh_dir):
     # Filter out non-building objects if necessary
     ignored_keywords = ['road', 'sidewalk', 'ground']
     
-    print(f"Processing {len(files)} buildings directly from geometry...")
+    mode = "footprints" if footprints else "bounds only"
+    print(f"Processing {len(files)} meshes ({mode})...")
 
     for file in files:
         if any(k in file for k in ignored_keywords):
             continue
 
         mesh_path = os.path.join(mesh_dir, file)
-        # 1. Load the mesh
-        mesh = trimesh.load(mesh_path, force='mesh')
+        mesh = trimesh.load(mesh_path, force='mesh', process=False)
         
-        # 2. Get standard bounds (Min/Max) for the engine collisions
         bbox_min = mesh.bounds[0]
         bbox_max = mesh.bounds[1]
+        footprint_coords = None
+
+        if not footprints:
+            obstacles.append({
+                "file": file,
+                "min": bbox_min,
+                "max": bbox_max,
+                "footprint": None,
+            })
+            continue
 
         try:
-            # 3. EXTRACT FOOTPRINT FROM GEOMETRY
+            # EXTRACT FOOTPRINT FROM GEOMETRY
             # We cut a slice 0.5 meters above the bottom of the building.
             # This avoids issues with uneven ground or bottom faces.
             slice_height = bbox_min[2] + 0.5
             
             # Create a cross-section
             section = mesh.section(plane_origin=[0, 0, slice_height], plane_normal=[0, 0, 1]) #type: ignore
-            
-            footprint_coords = None
 
             if section:
                 # Convert the 3D slice to a 2D planar polygon
