@@ -11,7 +11,8 @@ from matplotlib.patches import Rectangle, Arrow, Polygon
 from matplotlib.collections import PatchCollection
 
 from config import MathModelingConfig, MathSegment
-from ui.theme import ModernTheme 
+from ui.theme import ModernTheme
+from utils.jammer_config import update_initial_position_in_main
 
 matplotlib.use("TkAgg")
 matplotlib.rcParams['axes.unicode_minus'] = False
@@ -22,11 +23,20 @@ class MathPlannerGUI:
     Output: A list of MathSegment objects (via self.get_segments()).
     """
     
-    def __init__(self, root: tk.Tk, engine: Any, config: MathModelingConfig):
+    def __init__(
+        self,
+        root: tk.Tk,
+        engine: Any,
+        config: MathModelingConfig,
+        jammer_id: Optional[str] = None,
+        main_py_path: Optional[str] = None,
+    ):
         self.root = root
         self.engine = engine
         self.config = config
         self.dt = config.time_step
+        self.jammer_id = jammer_id
+        self.main_py_path = main_py_path
         
         # Apply Styling
         self.theme = ModernTheme(self.root)
@@ -37,6 +47,8 @@ class MathPlannerGUI:
         
         # --- Kinematic State (Current "Head" of the path) ---
         self.start_pos = config.starting_position.copy() # type: ignore
+        self.initial_position_changed = False
+        self.placement_mode = False
         
         # Current state trackers
         self.curr_pos = self.start_pos.copy()
@@ -48,7 +60,9 @@ class MathPlannerGUI:
         self.visual_path_history: List[np.ndarray] = [] # For drawing "Committed" lines
         
         # Interaction state
-        self._drag_data = {"x": None, "y": None, "pressed": False}
+        self._drag_data = {"x": None, "y": None, "pressed": False, "button": None}
+        self.start_marker = None
+        self.placement_preview = None
 
         # --- Build UI ---
         self._setup_layout()
@@ -61,6 +75,9 @@ class MathPlannerGUI:
     def get_segments(self) -> List[MathSegment]:
         """Public accessor for the Controller to retrieve the work done."""
         return self.saved_segments
+
+    def get_start_position(self) -> np.ndarray:
+        return self.start_pos.copy()
 
     # ==========================================
     # UI Setup & Styling
@@ -156,13 +173,34 @@ class MathPlannerGUI:
             self.ax.set_xlim(-500, 500)
             self.ax.set_ylim(-500, 500)
             
-        self.ax.plot(self.start_pos[0], self.start_pos[1], 'o', color='#00cc00', markersize=8, label='Start')
+        self.start_marker, = self.ax.plot(
+            [self.start_pos[0]], [self.start_pos[1]],
+            'o', color='#00cc00', markersize=8, label='Start',
+        )
+        self.placement_preview, = self.ax.plot(
+            [], [], 'x', color='#ff66ff', markersize=10, label='Placement preview',
+        )
 
     # ==========================================
     # Controls & Widgets
     # ==========================================
 
     def _setup_controls_sidebar(self):
+        self.btn_change_start = ttk.Button(
+            self.side_frame,
+            text="Change initial jammer position",
+            command=self._enter_placement_mode,
+        )
+        self.btn_change_start.pack(fill=tk.X, pady=(0, 8))
+
+        self.placement_status = ttk.Label(
+            self.side_frame,
+            text="",
+            style="Panel.TLabel",
+            wraplength=220,
+        )
+        self.placement_status.pack(fill=tk.X, pady=(0, 10))
+
         ttk.Label(self.side_frame, text="Segment Controls", style="Panel.TLabel", font=("Helvetica", 16, "bold")).pack(pady=(0, 15))
 
         # Mode Tabs
@@ -212,6 +250,76 @@ class MathPlannerGUI:
         self.tree.pack(side=tk.TOP, fill=tk.X)
 
         ttk.Button(self.side_frame, text="FINISH & SAVE", command=self.finish).pack(side=tk.BOTTOM, fill=tk.X, pady=20)
+
+        self._update_start_controls_state()
+
+    def _can_change_initial_position(self) -> bool:
+        return len(self.saved_segments) == 0
+
+    def _update_start_controls_state(self):
+        if self._can_change_initial_position():
+            self.btn_change_start.state(["!disabled"])
+        else:
+            self.btn_change_start.state(["disabled"])
+            self._exit_placement_mode(silent=True)
+
+    def _enter_placement_mode(self):
+        if not self._can_change_initial_position():
+            return
+        self.placement_mode = True
+        self.placement_status.config(
+            text="Click on the map to set the initial jammer position."
+        )
+        self.btn_change_start.config(text="Cancel placement", command=self._cancel_placement_mode)
+
+    def _cancel_placement_mode(self):
+        self._exit_placement_mode()
+
+    def _exit_placement_mode(self, silent: bool = False):
+        self.placement_mode = False
+        if not silent:
+            self.placement_status.config(text="")
+        self.btn_change_start.config(
+            text="Change initial jammer position",
+            command=self._enter_placement_mode,
+        )
+        if self.placement_preview is not None:
+            self.placement_preview.set_data([], [])
+        self.canvas.draw_idle()
+
+    def _apply_initial_position(self, x: float, y: float):
+        z = float(self.start_pos[2])
+        new_pos = np.array([x, y, z])
+
+        if not self.engine.is_position_valid(new_pos):
+            messagebox.showerror(
+                "Invalid position",
+                "That point is outside the map or inside a building. Choose another location.",
+            )
+            return
+
+        self.start_pos = new_pos
+        self.curr_pos = new_pos.copy()
+        self.curr_vel = 0.0
+        self.curr_heading = np.deg2rad(self.var_start_heading.get())
+        self.initial_position_changed = True
+
+        if self.jammer_id:
+            try:
+                self.engine.scene.get(self.jammer_id).position = new_pos
+            except Exception as e:
+                print(f"Warning: could not update scene transmitter position: {e}")
+
+        if self.main_py_path and self.jammer_id:
+            if update_initial_position_in_main(self.main_py_path, self.jammer_id, new_pos):
+                print(f"Saved {self.jammer_id} initial position to {self.main_py_path}")
+            else:
+                print(f"Warning: could not update initial position for {self.jammer_id} in main.py")
+
+        self.start_marker.set_data([new_pos[0]], [new_pos[1]])
+        self._exit_placement_mode()
+        self._refresh_committed_line()
+        self.update_preview()
 
     def _create_compound_slider(self, label_text, variable, min_val, max_val, is_duration=False):
         frame = ttk.Frame(self.controls_container, style="Panel.TFrame")
@@ -405,6 +513,7 @@ class MathPlannerGUI:
         self.tree.insert("", tk.END, values=(len(self.saved_segments), mode, f"{new_segment.duration:.1f}s"))
         self._refresh_committed_line()
         self.on_tab_changed(None) # Hides start heading slider if needed
+        self._update_start_controls_state()
 
     def undo_segment(self):
         if not self.saved_segments: return
@@ -420,6 +529,7 @@ class MathPlannerGUI:
         self.tree.delete(self.tree.get_children()[-1])
         self._refresh_committed_line()
         self.on_tab_changed(None)
+        self._update_start_controls_state()
 
     def _refresh_committed_line(self):
         if self.visual_path_history:
@@ -466,15 +576,52 @@ class MathPlannerGUI:
         self.canvas.draw_idle()
 
     def _on_press(self, event):
-        if event.inaxes != self.ax or self.fig.canvas.toolbar.mode != "": return # type: ignore
-        self._drag_data = {"x": event.xdata, "y": event.ydata, "pressed": True}
+        if event.inaxes != self.ax or self.fig.canvas.toolbar.mode != "":  # type: ignore
+            return
+        self._drag_data = {
+            "x": event.xdata,
+            "y": event.ydata,
+            "pressed": True,
+            "button": event.button,
+        }
 
     def _on_release(self, event):
+        if not self._drag_data["pressed"]:
+            return
+
+        is_drag = False
+        if event.xdata is not None and event.ydata is not None and self._drag_data["x"] is not None:
+            dist = np.hypot(event.xdata - self._drag_data["x"], event.ydata - self._drag_data["y"])
+            span = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
+            if dist > span * 0.01:
+                is_drag = True
+
+        if (
+            self.placement_mode
+            and self._drag_data["button"] == 1
+            and not is_drag
+            and event.inaxes == self.ax
+            and event.xdata is not None
+            and event.ydata is not None
+        ):
+            self._apply_initial_position(event.xdata, event.ydata)
+
         self._drag_data["pressed"] = False
+        self._drag_data["button"] = None
 
     def _on_drag(self, event):
-        if not self._drag_data["pressed"] or event.inaxes != self.ax: return
-        dx, dy = event.xdata - self._drag_data["x"], event.ydata - self._drag_data["y"]
+        if self.placement_mode:
+            if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+                self.placement_preview.set_data([event.xdata], [event.ydata])
+                self.canvas.draw_idle()
+            return
+
+        if not self._drag_data["pressed"] or event.inaxes != self.ax:
+            return
+        if self._drag_data["x"] is None or event.xdata is None:
+            return
+        dx = event.xdata - self._drag_data["x"]
+        dy = event.ydata - self._drag_data["y"]
         self.ax.set_xlim(self.ax.get_xlim() - dx)
         self.ax.set_ylim(self.ax.get_ylim() - dy)
         self.canvas.draw_idle()

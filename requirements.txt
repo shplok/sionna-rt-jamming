@@ -1,0 +1,14 @@
+# Tested with Python 3.12.12 in conda env "sionna".
+# Install: conda activate sionna && pip install -r requirements.txt
+#
+# Note: installing sionna-rt will pull additional dependencies (e.g. tensorflow).
+
+mitsuba==3.7.1
+drjit==1.2.0
+sionna-rt==1.2.0
+sionna==1.2.1
+numpy==1.26.4
+matplotlib==3.10.8
+scipy==1.17.0
+trimesh==4.11.1
+networkx==3.6.1

@@ -10,3 +10,7 @@ __pycache__/
 datasets/
 cache/
 data/Barcelona5KM_430609_4582157
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

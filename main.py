@@ -18,10 +18,12 @@ from core.strategies import GraphNavStrategy
 
 def main():
     # --- 1. Global Setup ---
-    SCENE_PATH = r"./data/NYC1.5KM_585751_4512036/simple_OSM_scene.xml"
-    MESHES_PATH = r"./data/NYC1.5KM_585751_4512036/mesh"
+    # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
+    # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
+    SCENE_PATH = r"./data/NYC3KM_585751_4512036/simple_OSM_scene.xml"
+    MESHES_PATH = r"./data/NYC3KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "NYC_1.5KM_singlejammer"
+    DATASET_NAME = "NYC_3jammer"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
     GLOBAL_TX_POWER_DBW = 10.0
@@ -32,13 +34,29 @@ def main():
     scene.frequency = FREQ_HZ
     buildings = gather_bboxes(MESHES_PATH)
 
-    # --- 3. Define Transmitters Config (for individual mode) ---
-    transmitters_config = [
-        {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM},
-        {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM}
+    # --- 3. Initial jammer positions (individual mode); editable in Math planner before first segment ---
+    initial_jammers_config = [
+        {
+            "name": "Jammer1",
+            "initial_position": np.array([-595.8, 55.2, Z_HEIGHT]),
+            "power_dbm": GLOBAL_TX_POWER_DBM,
+            "color": [1.0, 0.0, 0.0],
+        },
+        {
+            "name": "Jammer2",
+            "initial_position": np.array([-37.3, 27.1, Z_HEIGHT]),
+            "power_dbm": GLOBAL_TX_POWER_DBM,
+            "color": [0.0, 1.0, 0.0],
+        },
+        {
+            "name": "Jammer3",
+            "initial_position": np.array([168.3, -340.9, Z_HEIGHT]),
+            "power_dbm": GLOBAL_TX_POWER_DBM,
+            "color": [0.0, 0.0, 1.0],
+        },
     ]
 
-    b = 750 # half-length of map area
+    b = 750
     map_bounds = {'x': [-b, b], 'y': [-b, b], 'z': [Z_HEIGHT, Z_HEIGHT]}
     cell_size = (8, 8) # resolution of radio map grid
 
@@ -57,22 +75,22 @@ def main():
     
     if mode == "individual":
         # Pass the config so we can spawn them inside this function
-        run_individual_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings)
+        run_individual_mode(engine, initial_jammers_config, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings)
     elif mode == "batch":
         # Batch mode doesn't need the default config, it makes its own
         run_batch_mode(engine, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings, GLOBAL_TX_POWER_DBM)
     else:
         raise RuntimeError("No valid mode selected. Exiting.")
 
-def run_individual_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings):
+def run_individual_mode(engine, initial_jammers_config, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings):
     """Configures specific paths for each jammer, saves them, then runs Sionna simulation."""
     
     print("Spawning individual Transmitters...")
-    for tx_info in transmitters_config:
+    for tx_info in initial_jammers_config:
         if tx_info["name"] not in scene.transmitters:
             tx = Transmitter(
                 name=tx_info["name"],
-                position=tx_info["position"],
+                position=tx_info["initial_position"],
                 power_dbm=tx_info["power_dbm"],
                 color=tx_info.get("color", [0.5, 0.5, 0.5])
             )
@@ -82,16 +100,19 @@ def run_individual_mode(engine, transmitters_config, scene, map_center, map_size
     global_dt = None
     
     # A. Path Configuration Loop
-    for tx in transmitters_config:
+    for tx in initial_jammers_config:
         j_id = tx['name']
         print(f"--- Configuring {j_id} ---")
         
-        controller = MissionController(engine, j_id, tx['position'], fixed_dt=global_dt)
+        controller = MissionController(engine, j_id, tx['initial_position'], fixed_dt=global_dt)
         path, metadata = controller.run(mode="individual")
         
         if path is None:
             print(f"Setup cancelled for {j_id}. Exiting.")
             return
+
+        if metadata.get("initial_position") is not None:
+            tx["initial_position"] = metadata["initial_position"]
 
         if global_dt is None: 
             global_dt = metadata['dt_used']
@@ -212,7 +233,6 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
             # Add the noise floor in Watts before converting to dBW
             agg_dbw = 10 * np.log10(aggregate_rss_watts + NOISE_FLOOR_WATTS) 
             aggregated_rss_history.append(agg_dbw)
-
             # --- B. Save Individual Maps ---
             # Sionna returns results in the order of insertion into `scene.transmitters`
             # We iterate safely by index

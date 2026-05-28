@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 import numpy as np
 from typing import Optional, Tuple, Dict
@@ -116,8 +117,19 @@ class MissionController:
         root = tk.Tk()
         root.title("Path Planner")
         
-        app = MathPlannerGUI(root, self.engine, gui_config)
+        main_py_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "main.py")
+        )
+        app = MathPlannerGUI(
+            root,
+            self.engine,
+            gui_config,
+            jammer_id=self.jammer_id,
+            main_py_path=main_py_path,
+        )
         root.mainloop() # Blocks until user finishes planning
+
+        self.start_pos = app.get_start_position()
 
         segments = app.get_segments()
         
@@ -134,7 +146,11 @@ class MissionController:
         )
         
         strategy = MathStrategy()
-        return self.engine.generate_path(self.jammer_id, strategy, final_config)
+        path = self.engine.generate_path(self.jammer_id, strategy, final_config)
+        metadata = {"initial_position": self.start_pos.copy()}
+        if app.initial_position_changed:
+            metadata["initial_position_changed"] = True
+        return path, metadata
     
     def _run_waypoint_workflow(self, dt: float, velocity: float):
         config = WaypointConfig(
