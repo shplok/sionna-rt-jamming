@@ -19,8 +19,8 @@ matplotlib.use("TkAgg")
 # ==========================================
 # CONFIGURATION
 # ==========================================
-RESULTS_FOLDER = "./datasets/dataset_test"
-MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/data/downtown_chicago_luis/meshes"
+RESULTS_FOLDER = "./datasets/NYC_1.5KM_individual"
+MESHES_PATH = r"data/NYC1.5KM_585751_4512036"
 NUM_PATHS_TO_PLOT = 50 
 
 # ==========================================
