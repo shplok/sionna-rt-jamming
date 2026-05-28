@@ -14,16 +14,18 @@ from ui.app_controller import MissionController
 from ui.menu import MenuApp
 from core.strategies import GraphNavStrategy 
 
+
+
 def main():
     # --- 1. Global Setup ---
-    # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
-    # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
     SCENE_PATH = r"./data/NYC1.5KM_585751_4512036/simple_OSM_scene.xml"
     MESHES_PATH = r"./data/NYC1.5KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "NYC_1.5KM_individual"
+    DATASET_NAME = "NYC_1.5KM_singlejammer"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
+    GLOBAL_TX_POWER_DBW = 10.0
+    GLOBAL_TX_POWER_DBM = GLOBAL_TX_POWER_DBW + 30.0 # Sionna expects input in dBm
 
     # --- 2. Load Physical World ---
     scene = load_scene(SCENE_PATH)
@@ -32,13 +34,13 @@ def main():
 
     # --- 3. Define Transmitters Config (for individual mode) ---
     transmitters_config = [
-        {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT])},
-        {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT])}
+        {"name": "Jammer1", "position": np.array([220, -185, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM},
+        {"name": "Jammer2", "position": np.array([-180, 200, Z_HEIGHT]), "power_dbm": GLOBAL_TX_POWER_DBM}
     ]
 
     b = 750 # half-length of map area
     map_bounds = {'x': [-b, b], 'y': [-b, b], 'z': [Z_HEIGHT, Z_HEIGHT]}
-    cell_size = (10, 10) # resolution of radio map grid
+    cell_size = (8, 8) # resolution of radio map grid
 
     # --- 4. Static Scene Setup ---
     map_center, map_size = create_scene_objects(
@@ -58,7 +60,7 @@ def main():
         run_individual_mode(engine, transmitters_config, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings)
     elif mode == "batch":
         # Batch mode doesn't need the default config, it makes its own
-        run_batch_mode(engine, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings, Z_HEIGHT)
+        run_batch_mode(engine, scene, map_center, map_size, cell_size, OUTPUT_DIR, DATASET_NAME, buildings, GLOBAL_TX_POWER_DBM)
     else:
         raise RuntimeError("No valid mode selected. Exiting.")
 
@@ -71,6 +73,7 @@ def run_individual_mode(engine, transmitters_config, scene, map_center, map_size
             tx = Transmitter(
                 name=tx_info["name"],
                 position=tx_info["position"],
+                power_dbm=tx_info["power_dbm"],
                 color=tx_info.get("color", [0.5, 0.5, 0.5])
             )
             scene.add(tx)
@@ -102,7 +105,7 @@ def run_individual_mode(engine, transmitters_config, scene, map_center, map_size
     # C. Run Simulation
     run_simulation(engine, scene, map_center, map_size, cell_size, os.path.join(output_dir, dataset_name), buildings=buildings)
 
-def run_batch_mode(engine, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings, z_height):
+def run_batch_mode(engine, scene, map_center, map_size, cell_size, output_dir, dataset_name, buildings, tx_power_dbm):
     """Generates N paths, ADDS them as new jammers to the scene, and runs one massive simulation."""
     
     # 1. Configure Graph
@@ -133,7 +136,7 @@ def run_batch_mode(engine, scene, map_center, map_size, cell_size, output_dir, d
             # B. Add Physical Transmitter to Scene
             if jammer_name not in scene.transmitters:
                 # print(f"  Spawning {jammer_name} in scene...", end="\r")
-                new_tx = Transmitter(name=jammer_name, position=path[0], power_dbm=30)
+                new_tx = Transmitter(name=jammer_name, position=path[0], power_dbm=tx_power_dbm)
                 scene.add(new_tx)
             
             print(f"  Generated {jammer_name}...", end="\r")
@@ -163,15 +166,12 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
     rm_solver = RadioMapSolver()
 
     # --- Storage Initialization ---
-    # 1. List for the Aggregated RSS frames (dBm)
+    # 1. List for the Aggregated RSS frames (dBW)
     aggregated_rss_history = []
     
-    # 2. Dict for Individual RSS frames (dBm)
+    # 2. Dict for Individual RSS frames (dBW)
     # Mapping: jammer_name -> list of frames
     individual_rss_histories = {name: [] for name in scene.transmitters}
-
-    tx_power_dbm = 30.0
-    tx_power_linear = 10**(tx_power_dbm / 10.0) / 1000.0 # Convert dBm to Watts
 
     for step in range(total_steps):
 
@@ -184,8 +184,8 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
         try:
             rm = rm_solver(
                 scene,
-                max_depth=50,                       # Maximum ray bounces 
-                samples_per_tx=10**6,               # More samples = less noise but more memory
+                max_depth=80,                       # Maximum ray bounces 
+                samples_per_tx=10**7,               # More samples = less noise but more memory
                 cell_size=cell_size,                # Resolution of the radio map
                 center=map_center,                  # Center of the coverage area
                 size=[map_size[0], map_size[1]],    # Total size of the radio map #type: ignore
@@ -195,17 +195,23 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
                 refraction=True
             )
 
-            # linear_gain shape is typically (Tx, H, W)
-            linear_gain = rm.rss.numpy() 
+            # linear_gain_watts shape is typically (Tx, H, W). The output is natively in Watts.
+            linear_gain_watts = rm.rss.numpy() 
+            
+            # Define the physical noise floor from the lecture slides
+            NOISE_FLOOR_WATTS = 8e-15
 
             # Ensure shape consistency if there is only 1 transmitter
-            if len(linear_gain.shape) == 2:
-                linear_gain = np.expand_dims(linear_gain, axis=0)
+            if len(linear_gain_watts.shape) == 2:
+                linear_gain_watts = np.expand_dims(linear_gain_watts, axis=0)
             
             # --- A. Save Aggregated Map ---
-            aggregate_rss_watts = np.sum(linear_gain * tx_power_linear, axis=0)
-            agg_dbm = 10 * np.log10(np.maximum(aggregate_rss_watts, 1e-20)) + 30 
-            aggregated_rss_history.append(agg_dbm)
+            # Sum the natively scaled Watts from all transmitters
+            aggregate_rss_watts = np.sum(linear_gain_watts, axis=0)
+            
+            # Add the noise floor in Watts before converting to dBW
+            agg_dbw = 10 * np.log10(aggregate_rss_watts + NOISE_FLOOR_WATTS) 
+            aggregated_rss_history.append(agg_dbw)
 
             # --- B. Save Individual Maps ---
             # Sionna returns results in the order of insertion into `scene.transmitters`
@@ -213,11 +219,13 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
             tx_names = list(scene.transmitters.keys())
             
             for i, name in enumerate(tx_names):
-                # Extract specific slice for this transmitter
-                indiv_watts = linear_gain[i] * tx_power_linear
-                indiv_dbm = 10 * np.log10(np.maximum(indiv_watts, 1e-20)) + 30
+                # Extract specific slice for this transmitter natively in Watts
+                indiv_watts = linear_gain_watts[i]
                 
-                individual_rss_histories[name].append(indiv_dbm)
+                # Add the noise floor in Watts before converting to dBW
+                indiv_dbw = 10 * np.log10(indiv_watts + NOISE_FLOOR_WATTS)
+                
+                individual_rss_histories[name].append(indiv_dbw)
 
         except Exception as e:
             raise RuntimeError(f"Error during RadioMap computation at step {step}: {e}")
