@@ -38,19 +38,19 @@ def main():
     initial_jammers_config = [
         {
             "name": "Jammer1",
-            "initial_position": np.array([-595.8, 55.2, Z_HEIGHT]),
+            "initial_position": np.array([-584.1, -541.7, Z_HEIGHT]),
             "power_dbm": GLOBAL_TX_POWER_DBM,
             "color": [1.0, 0.0, 0.0],
         },
         {
             "name": "Jammer2",
-            "initial_position": np.array([-37.3, 27.1, Z_HEIGHT]),
+            "initial_position": np.array([686.7, -365.5, Z_HEIGHT]),
             "power_dbm": GLOBAL_TX_POWER_DBM,
             "color": [0.0, 1.0, 0.0],
         },
         {
             "name": "Jammer3",
-            "initial_position": np.array([168.3, -340.9, Z_HEIGHT]),
+            "initial_position": np.array([-24.9, -708.3, Z_HEIGHT]),
             "power_dbm": GLOBAL_TX_POWER_DBM,
             "color": [0.0, 0.0, 1.0],
         },

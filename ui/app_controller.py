@@ -164,11 +164,26 @@ class MissionController:
         root = tk.Tk()
         root.title("Waypoint Planner")
         
-        app = WaypointPlannerGUI(root, self.engine, config)
+        main_py_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "main.py")
+        )
+        app = WaypointPlannerGUI(
+            root,
+            self.engine,
+            config,
+            jammer_id=self.jammer_id,
+            main_py_path=main_py_path,
+        )
         root.mainloop()
         
         # C. Retrieve and Execute
+        self.start_pos = app.get_start_position()
+        config.starting_position = self.start_pos
         config.waypoints = app.get_waypoints()
         
         strategy = WaypointStrategy()
-        return self.engine.generate_path(self.jammer_id, strategy, config)
+        path, metadata = self.engine.generate_path(self.jammer_id, strategy, config)
+        metadata["initial_position"] = self.start_pos.copy()
+        if app.initial_position_changed:
+            metadata["initial_position_changed"] = True
+        return path, metadata

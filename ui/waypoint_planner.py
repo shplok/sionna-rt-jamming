@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk # type: ignore
 from matplotlib.patches import Rectangle, Polygon
 from matplotlib.collections import PatchCollection
-from typing import List, Any
+from typing import List, Any, Optional
 
 from core.utils import calculate_smooth_path, check_line_of_sight
 from config import WaypointConfig
@@ -15,10 +15,19 @@ from ui.theme import ModernTheme
 matplotlib.use("TkAgg")
 
 class WaypointPlannerGUI:
-    def __init__(self, root: tk.Tk, engine: Any, config: WaypointConfig):
+    def __init__(
+        self,
+        root: tk.Tk,
+        engine: Any,
+        config: WaypointConfig,
+        jammer_id: Optional[str] = None,
+        main_py_path: Optional[str] = None,
+    ):
         self.root = root
         self.engine = engine
         self.config = config
+        self.jammer_id = jammer_id
+        self.main_py_path = main_py_path
         
         self.theme = ModernTheme(self.root)
         self._apply_matplotlib_theme()
@@ -32,6 +41,8 @@ class WaypointPlannerGUI:
         self.start_pos = config.starting_position
         self.current_pos = self.start_pos
         self.is_hover_valid = True
+        self.placement_mode = False
+        self.initial_position_changed = False
 
         # Smoothing state
         self.enable_smoothing = tk.BooleanVar(value=self.config.enable_smoothing)
@@ -77,10 +88,20 @@ class WaypointPlannerGUI:
         
         # Instructions
         instr = "Controls: [Left Click] Add Point | [Right Click] Undo | [Wheel] Zoom | [Middle Click] Pan"
-        ttk.Label(ctrl_frame, text=instr, style="Panel.TLabel").pack(side=tk.LEFT)
+        ttk.Label(ctrl_frame, text=instr, style="Panel.TLabel").pack(side=tk.LEFT, padx=(0, 10))
 
         right_box = ttk.Frame(ctrl_frame, style="Panel.TFrame")
         right_box.pack(side=tk.RIGHT)
+
+        self.btn_change_start = ttk.Button(
+            right_box,
+            text="Change initial jammer position",
+            command=self._enter_placement_mode,
+        )
+        self.btn_change_start.pack(side=tk.LEFT, padx=5)
+
+        btn_finish = ttk.Button(right_box, text="FINISH & SAVE", command=self.finish, style="Action.TButton")
+        btn_finish.pack(side=tk.LEFT, padx=5)
 
         center_frame = ttk.Frame(ctrl_frame, style="Panel.TFrame")
         center_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
@@ -93,9 +114,13 @@ class WaypointPlannerGUI:
             command=self._update_plot
         )
         self.chk_smooth.pack(anchor="center")
-        
-        btn_finish = ttk.Button(ctrl_frame, text="FINISH & SAVE", command=self.finish, style="Action.TButton")
-        btn_finish.pack(side=tk.RIGHT)
+
+        self.placement_status = ttk.Label(
+            center_frame,
+            text="",
+            style="Panel.TLabel",
+        )
+        self.placement_status.pack(anchor="center")
 
     def _setup_map_canvas(self):
         self.fig = plt.figure(figsize=(9, 9), dpi=100)
@@ -126,13 +151,6 @@ class WaypointPlannerGUI:
         
         # Initial Draw
         self._draw_environment()
-        
-        # Dynamic Artists
-        self.path_line, = self.ax.plot([], [], '-', color='#4cc2ff', lw=2, markersize=4)
-        self.control_points, = self.ax.plot([], [], 'o', color='#4cc2ff', markersize=4, alpha=0.6)
-
-        self.preview_line, = self.ax.plot([], [], '--', color='#00ff00', lw=1)
-        self.error_text = self.ax.text(0.02, 0.98, "", transform=self.ax.transAxes, color='red', fontweight='bold', va='top')
 
     def _draw_environment(self):
         self.ax.clear()
@@ -157,7 +175,7 @@ class WaypointPlannerGUI:
             self.ax.add_collection(pc)
             
         # Draw Start
-        self.ax.plot(self.start_pos[0], self.start_pos[1], 'D', color='#00cc00', markersize=8, label="Start") # type: ignore
+        self.start_marker, = self.ax.plot(self.start_pos[0], self.start_pos[1], 'D', color='#00cc00', markersize=8, label="Start") # type: ignore
         
         b = self.engine.bounds
         if b:
@@ -170,6 +188,7 @@ class WaypointPlannerGUI:
         self.path_line, = self.ax.plot([], [], '-', color='#4cc2ff', lw=2, markersize=4)
         self.control_points, = self.ax.plot([], [], 'o', color='#4cc2ff', markersize=4, alpha=0.6)
         self.preview_line, = self.ax.plot([], [], '--', color='#00ff00', lw=1)
+        self.placement_preview, = self.ax.plot([], [], 'x', color='#ff66ff', markersize=10, label='Placement preview')
         self.error_text = self.ax.text(0.02, 0.98, "", transform=self.ax.transAxes, color='red', fontweight='bold', va='top')
 
     # ==========================================
@@ -212,22 +231,32 @@ class WaypointPlannerGUI:
         if not self._drag_data["pressed"]: return
         
         is_drag = False
-        if event.xdata and event.ydata:
+        if event.xdata is not None and event.ydata is not None and self._drag_data["x"] is not None:
              dist = np.hypot(event.xdata - self._drag_data["x"], event.ydata - self._drag_data["y"])
              if dist > (self.ax.get_xlim()[1] - self.ax.get_xlim()[0]) * 0.01:
                  is_drag = True
 
         if event.button == 1 and not is_drag:
-            if self.is_hover_valid and event.inaxes == self.ax:
-                p = np.array([event.xdata, event.ydata, self.start_pos[2]]) # type: ignore
-                self.waypoints.append(p)
-                self._update_plot()
+            if self.placement_mode:
+                if event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+                    self._apply_initial_position(event.xdata, event.ydata)
+            else:
+                if self.is_hover_valid and event.inaxes == self.ax and event.xdata is not None and event.ydata is not None:
+                    p = np.array([event.xdata, event.ydata, self.start_pos[2]]) # type: ignore
+                    self.waypoints.append(p)
+                    self._update_plot()
 
         self._drag_data["pressed"] = False
         self._drag_data["button"] = None
 
     def _on_move_and_drag(self, event):
         if event.inaxes != self.ax: return
+
+        if self.placement_mode:
+            if event.xdata is not None and event.ydata is not None:
+                self.placement_preview.set_data([event.xdata], [event.ydata])
+                self.canvas.draw_idle()
+            return
 
         if self._drag_data["pressed"] and self._drag_data["button"] == 2:
             dx = event.xdata - self._drag_data["x"]
@@ -294,7 +323,80 @@ class WaypointPlannerGUI:
             if self.is_hover_valid: 
                 self.error_text.set_text("")
 
+        self._update_start_controls_state()
         self.canvas.draw_idle()
+
+    def _can_change_initial_position(self) -> bool:
+        return len(self.waypoints) == 0
+
+    def _update_start_controls_state(self):
+        if self._can_change_initial_position():
+            self.btn_change_start.state(["!disabled"])
+        else:
+            self.btn_change_start.state(["disabled"])
+            self._exit_placement_mode(silent=True)
+
+    def _enter_placement_mode(self):
+        if not self._can_change_initial_position():
+            return
+        self.placement_mode = True
+        self.placement_status.config(
+            text="Click on the map to set the initial jammer position."
+        )
+        self.btn_change_start.config(text="Cancel placement", command=self._cancel_placement_mode)
+        # Hide standard preview line
+        self.preview_line.set_data([], [])
+        self.canvas.draw_idle()
+
+    def _cancel_placement_mode(self):
+        self._exit_placement_mode()
+
+    def _exit_placement_mode(self, silent: bool = False):
+        self.placement_mode = False
+        if not silent:
+            self.placement_status.config(text="")
+        self.btn_change_start.config(
+            text="Change initial jammer position",
+            command=self._enter_placement_mode,
+        )
+        if self.placement_preview is not None:
+            self.placement_preview.set_data([], [])
+        self.canvas.draw_idle()
+
+    def _apply_initial_position(self, x: float, y: float):
+        z = float(self.start_pos[2])
+        new_pos = np.array([x, y, z])
+
+        if not self.engine.is_position_valid(new_pos):
+            messagebox.showerror(
+                "Invalid position",
+                "That point is outside the map or inside a building. Choose another location.",
+            )
+            return
+
+        self.start_pos = new_pos
+        self.current_pos = new_pos.copy()
+        self.initial_position_changed = True
+
+        if self.jammer_id:
+            try:
+                self.engine.scene.get(self.jammer_id).position = new_pos
+            except Exception as e:
+                print(f"Warning: could not update scene transmitter position: {e}")
+
+        if self.main_py_path and self.jammer_id:
+            from utils.jammer_config import update_initial_position_in_main
+            if update_initial_position_in_main(self.main_py_path, self.jammer_id, new_pos):
+                print(f"Saved {self.jammer_id} initial position to {self.main_py_path}")
+            else:
+                print(f"Warning: could not update initial position for {self.jammer_id} in main.py")
+
+        self._draw_environment()
+        self._exit_placement_mode()
+        self._update_plot()
+
+    def get_start_position(self) -> np.ndarray:
+        return self.start_pos.copy()
 
     def finish(self):
         if not self.waypoints:
