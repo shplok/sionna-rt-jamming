@@ -15,42 +15,47 @@
 # Sionna RT Jamming - Unified Non-Interactive Pipeline (SLURM + GPU)
 # 
 # ==============================================================================
-# Parámetros del Experimento (Modifica fácilmente aquí)
+# Experiment Parameters (Easily modify here)
 # ==============================================================================
-ACTION="all"                # all (todo) | generate (solo trayectorias) | plot | simulate
-NUM_COMBINATIONS=10         # Número de combinaciones multi-jammer a agregar (10)
-MIN_JAMMERS=2               # Mínimo de jammers por combinación
-MAX_JAMMERS=10              # Máximo de jammers por combinación
-SAVE_INDIVIDUAL=""          # Solo guardar combination_summary.json y rss_aggregated.npy
-SKIP_GIF=""                 # Generar animación GIF para cada combinación
+ACTION="all"                # all | generate (trajectories only) | plot | simulate
+NUM_COMBINATIONS=10         # Number of multi-jammer combinations to aggregate (10)
+MIN_JAMMERS=2               # Minimum number of jammers per combination
+MAX_JAMMERS=10              # Maximum number of jammers per combination
+SKIP_GIF=""                 # GIF animation: "" (generate GIFs) | "--skip-gif" (skip GIFs to save time and disk space)
+PRECISION="float16"         # Precision for aggregated maps: float16 | float32 | float64
 
-set -e  # Detener el script si algún paso falla
+set -e  # Stop script if any step fails
 
 echo "=================================================================="
 echo "Sionna RT Jamming - Unified Pipeline"
 echo "Host: $(hostname)"
-echo "Fecha de inicio: $(date)"
+echo "Start time: $(date)"
 echo "Action: $ACTION | Combos: $NUM_COMBINATIONS (Jammers: $MIN_JAMMERS-$MAX_JAMMERS)"
 echo "=================================================================="
 
-# Crear carpeta para logs de SLURM
+# Create directory for SLURM logs
 mkdir -p logs
 
-# 0. Configurar entorno Python / Conda y variante Mitsuba para GPU
+# 0. Load server/environment settings (editable in server_env.sh or server_config.json)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/server_env.sh" ]; then
+    source "${SCRIPT_DIR}/server_env.sh"
+fi
+
 source ~/.bashrc
-conda activate sionna 2>/dev/null || export PATH="/pomplun/share_home/l.gonzalezgudino001/.conda/envs/sionna/bin:$PATH"
+conda activate "${CONDA_ENV_NAME:-sionna}" 2>/dev/null || [ -z "$CONDA_BIN_DIR" ] || export PATH="${CONDA_BIN_DIR}:$PATH"
 
-export MITSUBA_VARIANT="cuda_ad_mono_polarized"
+export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 
-echo -e "\n[0/3] Verificando entorno GPU..."
+echo -e "\n[0/3] Verifying GPU environment..."
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
-python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print('Mitsuba variant activa:', mi.variant())"
+python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print('Active Mitsuba variant:', mi.variant())"
 
 # ------------------------------------------------------------------------------
-# Ejecutar pipeline completo: Generación + Visualización 2D + Simulación GPU
+# Run full pipeline: Generation + 2D Visualization + GPU Simulation
 # ------------------------------------------------------------------------------
 echo -e "\n=================================================================="
-echo "Ejecutando main_no_interactive.py con action=$ACTION..."
+echo "Running main_no_interactive.py with action=$ACTION..."
 echo "=================================================================="
 python main_no_interactive.py \
     --action "$ACTION" \
@@ -71,11 +76,11 @@ python main_no_interactive.py \
     --num-combinations "$NUM_COMBINATIONS" \
     --min-jammers "$MIN_JAMMERS" \
     --max-jammers "$MAX_JAMMERS" \
-    $SAVE_INDIVIDUAL \
+    --precision "$PRECISION" \
     $SKIP_GIF
 
 echo -e "\n=================================================================="
-echo "Pipeline completo finalizado exitosamente a las: $(date)"
-echo "Resultados de trayectorias en: ./datasets/nyc_single_jammers"
-echo "Resultados de simulación en:   ./datasets/simulation_results_nyc"
+echo "Full pipeline completed successfully at: $(date)"
+echo "Trajectory results in: ./datasets/nyc_single_jammers"
+echo "Simulation results in:   ./datasets/simulation_results_nyc"
 echo "=================================================================="

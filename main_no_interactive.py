@@ -92,12 +92,6 @@ def parse_args():
         default=10,
         help="Maximum number of simultaneous jammers per combination (default: 10).",
     )
-    parser.add_argument(
-        "--combo-seed",
-        type=int,
-        default=42,
-        help="Random seed for combination generation (default: 42).",
-    )
     # Trajectory Generation Parameters
     parser.add_argument(
         "--durations",
@@ -154,7 +148,7 @@ def parse_args():
         "--seed",
         type=int,
         default=42,
-        help="Random seed for corridor discovery reproducibility.",
+        help="Random seed for reproducibility across trajectory generation and combinations (default: 42).",
     )
     # Simulation Parameters
     parser.add_argument(
@@ -202,35 +196,16 @@ def parse_args():
         help="Max ray reflection bounces (default: 80).",
     )
     parser.add_argument(
-        "--num-sim-combos",
-        type=int,
-        default=1,
-        help="Number of multi-jammer combinations to simulate in GPU (default: 1).",
-    )
-    parser.add_argument(
-        "--sim-combo-indices",
-        type=int,
-        nargs="+",
-        default=None,
-        help="Specific combo indices to simulate (e.g. 0 5 12). Overrides --num-sim-combos.",
-    )
-    parser.add_argument(
         "--skip-gif",
         action="store_true",
-        help="Skip generating GIF animations to save simulation time and disk space.",
+        help="Options: omitted/default (generate GIF animations for combinations) or flag provided (skip GIF animations to save simulation time and disk space).",
     )
     parser.add_argument(
-        "--save-individual",
-        dest="save_individual",
-        action="store_true",
-        default=False,
-        help="Save individual jammer RSS maps (rss_Jammer*.npy) inside each combo folder (default: False to optimize disk space).",
-    )
-    parser.add_argument(
-        "--no-save-individual",
-        dest="save_individual",
-        action="store_false",
-        help="Do not save individual jammer RSS maps inside combo folders.",
+        "--precision",
+        type=str,
+        default="float16",
+        choices=["float16", "float32", "float64", "fp16", "fp32", "fp64"],
+        help="Floating-point precision for saving aggregated radio maps (default: 'float16'; options: float16, float32, float64).",
     )
     return parser.parse_args()
 
@@ -590,7 +565,7 @@ def run_aggregation(args, obstacles):
         raise ValueError(f"Not enough base radio maps ({len(base_entries)}) for min_jammers ({args.min_jammers})")
 
     os.makedirs(args.sim_output_dir, exist_ok=True)
-    rng = np.random.default_rng(args.combo_seed)
+    rng = np.random.default_rng(args.seed)
     NOISE_FLOOR_WATTS = 8e-15
 
     # Pre-load base radio maps (in Watts) into memory for instantaneous aggregation
@@ -659,13 +634,22 @@ def run_aggregation(args, obstacles):
             })
 
         # Apply exact noise floor equation from main.py: agg_dbw = 10 * log10(P_agg_watts + 8e-15)
-        # Using float16 precision to minimize disk usage while preserving radio map fidelity
         agg_dbw_f32 = 10.0 * np.log10(agg_watts + NOISE_FLOOR_WATTS)
         if not np.all(np.isfinite(agg_dbw_f32)):
             finite_dbw = agg_dbw_f32[np.isfinite(agg_dbw_f32)]
             max_dbw_finite = float(np.max(finite_dbw)) if len(finite_dbw) > 0 else 40.0
             agg_dbw_f32 = np.nan_to_num(agg_dbw_f32, posinf=max_dbw_finite, neginf=-141.0, nan=-141.0)
-        agg_dbw = agg_dbw_f32.astype(np.float16)
+        
+        precision_map = {
+            "float16": np.float16,
+            "fp16": np.float16,
+            "float32": np.float32,
+            "fp32": np.float32,
+            "float64": np.float64,
+            "fp64": np.float64,
+        }
+        target_dtype = precision_map.get(args.precision.lower(), np.float16)
+        agg_dbw = agg_dbw_f32.astype(target_dtype)
 
         np.save(os.path.join(combo_dir, "rss_aggregated.npy"), agg_dbw)
 
