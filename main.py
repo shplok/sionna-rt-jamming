@@ -2,8 +2,15 @@ import sys, os
 import shutil
 import numpy as np
 import matplotlib.pyplot as plt
-import mitsuba as mi
-mi.set_variant("llvm_ad_mono_polarized")
+# Set Mitsuba variant: prioritize GPU (cuda_ad_mono_polarized) with CPU fallback
+variant = os.environ.get("MITSUBA_VARIANT", "cuda_ad_mono_polarized")
+try:
+    mi.set_variant(variant)
+    print(f"Mitsuba variant set to: {mi.variant()}")
+except Exception as e:
+    print(f"Warning: Could not set variant '{variant}' ({e}). Falling back to 'llvm_ad_mono_polarized'.")
+    mi.set_variant("llvm_ad_mono_polarized")
+
 
 from sionna.rt import load_scene, RadioMapSolver, Transmitter
 from utils.scene_objects import create_scene_objects, gather_bboxes
@@ -18,12 +25,10 @@ from core.strategies import GraphNavStrategy
 
 def main():
     # --- 1. Global Setup ---
-    # SCENE_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/ChicagoMarionaClean.xml"
-    # MESHES_PATH = r"/home/luisg-ubuntu/sionna_rt_jamming/source_data/downtown_chicago_luis/meshes"
     SCENE_PATH = r"./data/NYC3KM_585751_4512036/simple_OSM_scene.xml"
     MESHES_PATH = r"./data/NYC3KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"
-    DATASET_NAME = "NYC_3jammer"
+    DATASET_NAME = "NYC_2jammer"
     FREQ_HZ = 1.57542e9
     Z_HEIGHT = 1.5
     GLOBAL_TX_POWER_DBW = 10.0
@@ -38,22 +43,22 @@ def main():
     initial_jammers_config = [
         {
             "name": "Jammer1",
-            "initial_position": np.array([-584.1, -541.7, Z_HEIGHT]),
+            "initial_position": np.array([-652.3, -645.8, Z_HEIGHT]),
             "power_dbm": GLOBAL_TX_POWER_DBM,
             "color": [1.0, 0.0, 0.0],
         },
         {
             "name": "Jammer2",
-            "initial_position": np.array([686.7, -365.5, Z_HEIGHT]),
+            "initial_position": np.array([408.5, -213.2, Z_HEIGHT]),
             "power_dbm": GLOBAL_TX_POWER_DBM,
             "color": [0.0, 1.0, 0.0],
         },
-        {
-            "name": "Jammer3",
-            "initial_position": np.array([-24.9, -708.3, Z_HEIGHT]),
-            "power_dbm": GLOBAL_TX_POWER_DBM,
-            "color": [0.0, 0.0, 1.0],
-        },
+        # {
+        #     "name": "Jammer3",
+        #     "initial_position": np.array([-24.9, -708.3, Z_HEIGHT]),
+        #     "power_dbm": GLOBAL_TX_POWER_DBM,
+        #     "color": [0.0, 0.0, 1.0],
+        # },
     ]
 
     b = 750

@@ -9,8 +9,12 @@ __pycache__/
 # data
 datasets/
 cache/
-data/Barcelona5KM_430609_4582157
+data/*
+!data/clean_xml.py
+!data/sionna_osm/
 
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+logs/

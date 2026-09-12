@@ -28,15 +28,31 @@ def create_scene_objects(
 
     return map_center, (map_width, map_height)
 
-def gather_bboxes(mesh_dir, footprints=True):
+import pickle
+
+def gather_bboxes(mesh_dir, footprints=True, use_cache=True):
     """
-    Load building obstacles from PLY meshes.
+    Load building obstacles from PLY meshes with optional disk caching.
 
     footprints=True (default): slice meshes for polygon footprints (slow, used by planners).
     footprints=False: axis-aligned bounds only (faster, fine for visualization).
+    use_cache=True: caches parsed obstacles to a .pkl file in mesh_dir for instant reloads.
     """
     if not os.path.isdir(mesh_dir):
         raise FileNotFoundError(f"Mesh directory not found: {mesh_dir}")
+
+    cache_name = f"obstacles_{'footprints' if footprints else 'bounds'}_cache.pkl"
+    cache_path = os.path.join(mesh_dir, cache_name)
+
+    if use_cache and os.path.exists(cache_path):
+        print(f"Loading cached obstacles from {cache_path}...")
+        try:
+            with open(cache_path, "rb") as f:
+                obstacles = pickle.load(f)
+            print(f"Loaded {len(obstacles)} obstacles from cache.")
+            return obstacles
+        except Exception as e:
+            print(f"Warning: Failed to load cache ({e}), re-processing meshes...")
 
     obstacles = []
     
@@ -122,4 +138,13 @@ def gather_bboxes(mesh_dir, footprints=True):
             "footprint": footprint_coords
         })
 
+    if use_cache:
+        try:
+            print(f"Saving {len(obstacles)} obstacles to cache: {cache_path}...")
+            with open(cache_path, "wb") as f:
+                pickle.dump(obstacles, f)
+        except Exception as e:
+            print(f"Warning: Failed to save obstacle cache ({e})")
+
     return obstacles
+
