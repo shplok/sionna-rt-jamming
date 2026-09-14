@@ -86,6 +86,30 @@ case "$SIONNA_SITE" in
     ;;
 esac
 
+# --- keep third-party tools off $HOME -------------------------------------------
+# Nothing in this repo writes to $HOME, but several dependencies do by default. On
+# Explorer the per-user home quota is small and frequently full, and the failures are
+# obscure: conda reports solver errors, drjit silently disables its cache, matplotlib
+# warns about fonts, and Claude Code cannot persist its OAuth token (401 loops).
+if [ -n "$SIONNA_PROJ" ] && [ -d "$SIONNA_PROJ" ]; then
+    export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$SIONNA_PROJ/.cache}"
+    export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$SIONNA_PROJ/pip-cache}"
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-$SIONNA_PROJ/.cache/matplotlib}"
+    export CONDA_PKGS_DIRS="${CONDA_PKGS_DIRS:-$SIONNA_PROJ/conda-pkgs}"
+    mkdir -p "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$MPLCONFIGDIR" 2>/dev/null || true
+fi
+# drjit/mitsuba need libLLVM for the CPU backend; it is present on Explorer but not
+# on the loader path. Without it `import sionna.rt` fails on CPU nodes.
+if [ -z "$DRJIT_LIBLLVM_PATH" ]; then
+    for _l in /usr/lib64/libLLVM.so* /usr/lib/x86_64-linux-gnu/libLLVM.so*; do
+        [ -e "$_l" ] && { export DRJIT_LIBLLVM_PATH="$_l"; break; }
+    done
+fi
+# NOTE: drjit's kernel cache path is derived from $HOME and has no env override. When
+# home is full it prints `could not use "~/.drjit"` and disables the disk cache. That
+# is a compile-speed hit only, not a correctness problem -- the real fix is freeing
+# home space, not an environment variable.
+
 # Shared across sites
 export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 export SIONNA_GPU_MEM="${SIONNA_GPU_MEM:-16G}"

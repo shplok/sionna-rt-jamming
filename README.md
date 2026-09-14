@@ -200,6 +200,59 @@ the mesh directory, so later runs are instant.
 The whole dataset is built here. Two SLURM jobs: ray tracing (GPU), then everything else
 (CPU). Follow the steps below in order.
 
+### ⚠️ Northeastern Explorer: the home quota will bite you
+
+**Read this before installing anything.** Explorer gives each user a small quota on
+`/home`, separate from the lab's 35 TB on `/projects`. That quota is easy to fill — a
+single miniconda install is ~43 GB — and when it is full the failures are **misleading**:
+
+| What you see | What it actually is |
+|---|---|
+| `CondaValueError: solver backend (libmamba) not recognized` | conda cannot write `~/.condarc` |
+| `conda create --prefix /projects/...` fails with `Errno 122` | conda writes lockfiles and its index cache to `~/.conda` **regardless of `--prefix`** |
+| `jit_init(): could not use "~/.drjit"` | drjit kernel cache disabled |
+| `Could not save font_manager cache` | matplotlib font cache |
+| **Claude Code 401 loops after `/login` succeeds** | it cannot persist the refreshed OAuth token to `~/.claude/` |
+
+`df -h /home` is **not** the check — it shows the filesystem (110 TB free), not your
+quota. Test writability instead:
+
+```bash
+touch ~/.quota_test && rm ~/.quota_test && echo "home OK" || echo "HOME FULL"
+```
+
+**Rules for this project on Explorer**
+
+1. **Everything lives on `/projects/ipl_lab`** — the repo, miniconda, the venv, the
+   dataset. Nothing on `/home`.
+2. **`server_env.sh` redirects what it can** — `XDG_CACHE_HOME`, `PIP_CACHE_DIR`,
+   `MPLCONFIGDIR`, `CONDA_PKGS_DIRS` — automatically, whenever `SIONNA_PROJ` exists.
+3. **conda's internal writes cannot be redirected by a variable.** For any `conda`
+   command, override `HOME` for that command only:
+   ```bash
+   mkdir -p /projects/ipl_lab/$USER/conda-home
+   HOME=/projects/ipl_lab/$USER/conda-home bash Miniconda3-py311_*-Linux-x86_64.sh -b -p /projects/ipl_lab/miniconda3
+   ```
+4. **drjit's kernel cache has no override** — it is derived from `$HOME`. When home is
+   full it disables the disk cache and says so. That costs compile time, not
+   correctness. The only fix is free space.
+5. **Keep some home space free anyway.** Claude Code, SLURM and your shell all need it.
+   `conda clean --all -y` on the home miniconda deletes only the download cache, never
+   environments, and usually recovers 10–20 GB.
+
+Working layout:
+
+```
+/projects/ipl_lab/
+├── miniconda3/                     Python 3.11 interpreter source only
+└── jaramillocivill.m/
+    ├── conda-home/                 HOME override target for conda commands
+    ├── pip-cache/  .cache/
+    └── sionna-rt-jamming/
+        ├── .venv/                  ~6 GB, gitignored
+        └── datasets/               ~73 GB, gitignored
+```
+
 ### Submitting on the cluster
 
 `./submit.sh` picks the SLURM settings for whichever cluster you are on. Two profiles live
