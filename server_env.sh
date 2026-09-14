@@ -105,23 +105,3 @@ sionna_activate_conda() {
     echo "[server_env]   tried CONDA_BIN_DIR=$CONDA_BIN_DIR" >&2
     return 1
 }
-
-# Activate the environment the way the caller's shell can actually do it. `conda
-# activate` only works after conda's shell hook has been sourced, which is not
-# guaranteed inside a batch job even when it works interactively.
-sionna_activate_conda() {
-    if [ -n "$CONDA_SH" ] && [ -f "$CONDA_SH" ]; then
-        # shellcheck disable=SC1090
-        source "$CONDA_SH" && conda activate "${CONDA_ENV_NAME:-sionna}" && return 0
-    fi
-    if command -v conda >/dev/null 2>&1; then
-        conda activate "${CONDA_ENV_NAME:-sionna}" 2>/dev/null && return 0
-    fi
-    if [ -d "$CONDA_BIN_DIR" ]; then
-        export PATH="$CONDA_BIN_DIR:$PATH" && return 0
-    fi
-    echo "[server_env] ERROR: could not activate '${CONDA_ENV_NAME}'." >&2
-    echo "[server_env]   tried CONDA_SH=$CONDA_SH" >&2
-    echo "[server_env]   tried CONDA_BIN_DIR=$CONDA_BIN_DIR" >&2
-    return 1
-}
