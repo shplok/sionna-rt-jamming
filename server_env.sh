@@ -33,12 +33,16 @@ SIONNA_SITE="$(_sionna_detect_site)"
 case "$SIONNA_SITE" in
 
   explorer)
-    # Northeastern Explorer (Mariona). miniconda in $HOME, project storage under
-    # /projects/ipl_lab -- the dataset is ~73 GB and must NOT land on the home quota.
+    # Northeastern Explorer (Mariona). The home quota is small and already full, so
+    # BOTH miniconda and the dataset live under /projects/ipl_lab. The separate
+    # miniconda in $HOME (grpo-motion etc.) is left alone -- do not use it here.
+    export SIONNA_PROJ="${SIONNA_PROJ:-/projects/ipl_lab/$USER}"
     export CONDA_ENV_NAME="${CONDA_ENV_NAME:-sionna}"
-    export CONDA_SH="${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
-    export CONDA_BIN_DIR="${CONDA_BIN_DIR:-$HOME/miniconda3/envs/sionna/bin}"
-    export SIONNA_DATASET_ROOT="${SIONNA_DATASET_ROOT:-/projects/ipl_lab/$USER/sionna-rt-jamming/datasets}"
+    export CONDA_SH="${CONDA_SH:-$SIONNA_PROJ/miniconda3/etc/profile.d/conda.sh}"
+    export CONDA_BIN_DIR="${CONDA_BIN_DIR:-$SIONNA_PROJ/miniconda3/envs/sionna/bin}"
+    # the repo itself already lives on /projects, so repo-relative is fine and avoids
+    # a second copy of the path
+    export SIONNA_DATASET_ROOT="${SIONNA_DATASET_ROOT:-./datasets}"
     export SIONNA_PARTITION="${SIONNA_PARTITION:-gpu}"
     export SIONNA_ACCOUNT="${SIONNA_ACCOUNT:-}"          # Explorer does not need one
     export SIONNA_GPU_GRES="${SIONNA_GPU_GRES:-gpu:a100:1}"   # or gpu:h200:1

@@ -18,3 +18,7 @@ data/*
 **/.DS_Store
 
 logs/
+# editor/venv cruft
+.venv/
+venv/
+SESSION_*.md

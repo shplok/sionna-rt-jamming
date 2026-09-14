@@ -96,6 +96,17 @@ import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
         || echo "  BAD  could not activate '$CONDA_ENV_NAME'"
     conda env list 2>/dev/null | sed 's/^/       /' | head -8 || true
 
+    echo; echo "--- home quota (conda and pip fail obscurely when this is full) ---"
+    q="$( { quota -s 2>/dev/null || lfs quota -h -u "$USER" "$HOME" 2>/dev/null; } | tail -3 )"
+    [ -n "$q" ] && echo "$q" | sed 's/^/       /' || echo "       (quota command unavailable)"
+    hu=$(du -sh "$HOME" 2>/dev/null | cut -f1); echo "  \$HOME usage: ${hu:-?}"
+    if ! ( : > "$HOME/.sionna_write_test" ) 2>/dev/null; then
+        echo "  BAD  \$HOME is NOT writable -- quota is full. conda/pip will fail with"
+        echo "       'Errno 122 Disk quota exceeded'. Run: conda clean --all -y"
+    else
+        rm -f "$HOME/.sionna_write_test"; echo "  OK   \$HOME writable"
+    fi
+
     echo; echo "--- dataset storage ---"
     echo "  root: $SIONNA_DATASET_ROOT"
     if mkdir -p "$SIONNA_DATASET_ROOT" 2>/dev/null && [ -w "$SIONNA_DATASET_ROOT" ]; then
