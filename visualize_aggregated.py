@@ -2,7 +2,20 @@
 """
 Visualize Aggregated Radio Map Sequence as an Animated GIF (jammer_animation.gif).
 
-Uses the exact same animation style as main_no_interactive.py / utils.plotter.create_jammer_animation.
+Uses the exact same animation style as main_batch_cluster.py / utils.plotter.create_jammer_animation.
+
+!! STALE -- NOT UPDATED FOR THE TWO-BRANCH LAYOUT. Kept as-is, unreviewed, because it was
+!! pulled code (commit eff898c4) and still works if you point it at the right paths.
+!!
+!! Its defaults are dead:  ./datasets/simulation_results_nyc   (folder removed)
+!!                         ./datasets/nyc_single_jammers       (renamed)
+!! Current equivalents:    ./datasets/batch_simulation_nyc/multi_trajectory_jammers/<split>
+!!                         ./datasets/batch_simulation_nyc/single_trajectory_jammers
+!!
+!! It also expects the old flat combo_XXXX_kNN/ layout; scenarios are now nested under
+!! train/ val/ test/, and the per-scenario json is scenario_summary.json, not
+!! combination_summary.json. Pass --results-dir .../multi_trajectory_jammers/train and it
+!! should work. Fix properly or delete once you have decided whether you still want it.
 
 Usage:
     # 1. Generate jammer_animation.gif for combo 0:

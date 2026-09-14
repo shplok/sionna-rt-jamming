@@ -2,6 +2,7 @@ import sys, os
 import shutil
 import numpy as np
 import matplotlib.pyplot as plt
+import mitsuba as mi
 # Set Mitsuba variant: prioritize GPU (cuda_ad_mono_polarized) with CPU fallback
 variant = os.environ.get("MITSUBA_VARIANT", "cuda_ad_mono_polarized")
 try:
@@ -25,6 +26,19 @@ from core.strategies import GraphNavStrategy
 
 def main():
     # --- 1. Global Setup ---
+    # !! TODO -- GRID MISMATCH WITH THE BATCH DATASET. Deliberately not fixed yet.
+    # !!
+    # !! This script uses  b = 750  and  cell_size = (8, 8)  while pointing at the 3 km
+    # !! scene, so it covers only the central 1.5 km at 8 m resolution. The batch pipeline
+    # !! (main_batch_cluster.py) uses +/-1500 m and 10 m cells -> 300 x 300.
+    # !!
+    # !! Consequence: RSS produced here is NOT comparable with datasets/batch_simulation_*
+    # !! and must not be mixed into training or figures that also use the batch data.
+    # !! Fine for interactive exploration, which is all this entry point is for.
+    # !!
+    # !! To align, set b = 1500 and cell_size = (10, 10) below. Two lines, but it changes
+    # !! the radio-map grid from 188x188 to 300x300, so anything already produced with the
+    # !! current settings would need regenerating.
     SCENE_PATH = r"./data/NYC3KM_585751_4512036/simple_OSM_scene.xml"
     MESHES_PATH = r"./data/NYC3KM_585751_4512036/mesh"
     OUTPUT_DIR = "./datasets"

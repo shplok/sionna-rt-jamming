@@ -30,7 +30,7 @@ class MissionController:
         self.fixed_dt = fixed_dt
 
     def run(self, mode: str = "individual") -> Tuple[Optional[np.ndarray], Dict]:
-        """Main entry point called by main.py"""
+        """Main entry point called by main_interactive_local.py"""
 
         if self.start_pos is None and mode == "individual":
              raise RuntimeError(f"Cannot run individual mode for {self.jammer_id} without a start position.")
@@ -118,7 +118,7 @@ class MissionController:
         root.title("Path Planner")
         
         main_py_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "main.py")
+            os.path.join(os.path.dirname(__file__), "..", "main_interactive_local.py")
         )
         app = MathPlannerGUI(
             root,
@@ -165,7 +165,7 @@ class MissionController:
         root.title("Waypoint Planner")
         
         main_py_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "main.py")
+            os.path.join(os.path.dirname(__file__), "..", "main_interactive_local.py")
         )
         app = WaypointPlannerGUI(
             root,

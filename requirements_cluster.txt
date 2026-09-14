@@ -1,5 +1,12 @@
-# Tested with Python 3.11.16 in conda env "sionna".
-# Install: conda activate sionna && pip install -r requirements.txt
+# CLUSTER environment - Linux + NVIDIA GPU (CUDA 12.4).
+# Full `pip freeze` of the working conda env "sionna", Python 3.11.16.
+#
+#   conda create -n sionna python=3.11 && conda activate sionna
+#   pip install -r requirements_cluster.txt
+#
+# This will NOT install on macOS or a CPU-only machine: the torch pin carries a
+# +cu124 local version tag and the nvidia-* wheels are linux_x86_64 only.
+# For a laptop use requirements_local.txt instead.
 --extra-index-url https://download.pytorch.org/whl/cu124
 
 altair==6.2.2
