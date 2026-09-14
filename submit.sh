@@ -88,7 +88,32 @@ import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
     done
     n=$(ls ./datasets/batch_simulation_nyc/single_trajectory_jammers/traj_*.npy 2>/dev/null | wc -l)
     echo "  $n trajectory .npy files present (54 expected; 0 is fine, stage A1 makes them)"
-    echo; echo "--- disk ---"; df -h . | tail -1
+    echo; echo "--- conda ---"
+    if [ -n "$CONDA_SH" ] && [ -f "$CONDA_SH" ]; then echo "  OK   hook $CONDA_SH"
+    else echo "  BAD  no conda hook at '$CONDA_SH' -- set CONDA_SH to your"
+         echo "       <miniconda>/etc/profile.d/conda.sh"; fi
+    ( sionna_activate_conda >/dev/null 2>&1 && echo "  OK   activated '$CONDA_ENV_NAME' -> $(command -v python)" ) \
+        || echo "  BAD  could not activate '$CONDA_ENV_NAME'"
+    conda env list 2>/dev/null | sed 's/^/       /' | head -8 || true
+
+    echo; echo "--- dataset storage ---"
+    echo "  root: $SIONNA_DATASET_ROOT"
+    if mkdir -p "$SIONNA_DATASET_ROOT" 2>/dev/null && [ -w "$SIONNA_DATASET_ROOT" ]; then
+        avail=$(df -BG --output=avail "$SIONNA_DATASET_ROOT" 2>/dev/null | tail -1 | tr -dc '0-9')
+        [ -z "$avail" ] && avail=$(df -g "$SIONNA_DATASET_ROOT" 2>/dev/null | tail -1 | awk '{print $4}')
+        echo "  OK   writable, ${avail:-?} GB free  (the run needs ~80 GB)"
+        if [ -n "$avail" ] && [ "$avail" -lt 100 ] 2>/dev/null; then
+            echo "  WARN under 100 GB free -- the dataset is ~73 GB plus slack"
+        fi
+        case "$SIONNA_DATASET_ROOT" in
+          "$HOME"*|./*) echo "  WARN this looks like home or the repo. Home quotas are usually"
+                        echo "       far smaller than 73 GB -- point SIONNA_DATASET_ROOT at"
+                        echo "       project storage instead." ;;
+        esac
+    else
+        echo "  BAD  not writable: $SIONNA_DATASET_ROOT"
+    fi
+    df -h "$SIONNA_DATASET_ROOT" 2>/dev/null | tail -1 | sed 's/^/       /'
     ;;
 
   gpu)

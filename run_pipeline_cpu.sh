@@ -21,7 +21,6 @@
 #
 # Run run_pipeline_gpu.sh first.
 # ==============================================================================
-DATASET_DIR="./datasets/batch_simulation_nyc"
 SCENE_DIR="./data/NYC3KM_585751_4512036"
 CELL_SIZE=10
 MAP_BOUNDS_B=1500
@@ -45,8 +44,10 @@ set -e
 mkdir -p logs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "${SCRIPT_DIR}/server_env.sh" ] && source "${SCRIPT_DIR}/server_env.sh"
-source ~/.bashrc
-conda activate "${CONDA_ENV_NAME:-sionna}" 2>/dev/null || [ -z "$CONDA_BIN_DIR" ] || export PATH="${CONDA_BIN_DIR}:$PATH"
+# after server_env.sh, so SIONNA_DATASET_ROOT is known
+DATASET_DIR="${DATASET_DIR:-${SIONNA_DATASET_ROOT:-./datasets}/batch_simulation_nyc}"
+sionna_activate_conda || exit 1
+echo "python: $(command -v python)"
 
 echo -e "\n[B1/4] splits: trajectory pools, scenarios, static positions, sensors"
 python scripts/make_splits.py \

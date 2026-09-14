@@ -211,7 +211,8 @@ in `server_env.sh`:
 | GPU partition / gres | `gpu` / `gpu:a100:1` | `pomplun` / `gpu:1` |
 | CPU partition | `short` | `pomplun` |
 | Account | none | `cs_tales.imbiriba` |
-| Conda bin | `$HOME/.conda/envs/sionna/bin` | `/pomplun/share_home/l.gonzalezgudino001/...` |
+| Conda hook | `$HOME/miniconda3/etc/profile.d/conda.sh` | `/pomplun/share_home/l.gonzalezgudino001/...` |
+| Dataset root | `/projects/ipl_lab/$USER/sionna-rt-jamming/datasets` | `./datasets` |
 
 The site is detected from the hostname, falling back to which partitions `sinfo` reports.
 Force it with `export SIONNA_SITE=explorer` (or `pomplun`).
@@ -247,11 +248,24 @@ detects the allocation and runs in place rather than nesting an `srun`.
 **Step 2 — environment (once).**
 
 ```bash
+source ~/miniconda3/etc/profile.d/conda.sh
 conda create -n sionna python=3.11 && conda activate sionna
 pip install --upgrade pip setuptools wheel
 pip install -r requirements_cluster.txt
 python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print(mi.variant())"
 ```
+
+`conda activate` only works after conda's shell hook has been sourced, which is **not**
+guaranteed inside a batch job even when it works in your login shell. The pipeline scripts
+call `sionna_activate_conda` from `server_env.sh`, which sources `$CONDA_SH` first, falls
+back to `conda` on `PATH`, then to `$CONDA_BIN_DIR`, and fails loudly rather than silently
+running against the wrong Python.
+
+**⚠️ Where the dataset lands.** The run writes **~73 GB**, which will blow a typical home
+quota. The `explorer` profile therefore points `SIONNA_DATASET_ROOT` at
+`/projects/ipl_lab/$USER/sionna-rt-jamming/datasets`, not at the repo. `./submit.sh verify`
+checks that it is writable, reports free space, and warns if the root looks like `$HOME` or
+the repo. Override with `export SIONNA_DATASET_ROOT=/your/project/space`.
 
 **Step 3 — smoke test the stage that has never run.** `simulate_static` is new code that has
 never touched a GPU. 20 positions exercises scene loading, the solver call, the memmap write

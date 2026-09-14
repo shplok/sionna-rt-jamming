@@ -20,7 +20,6 @@
 # run_pipeline_cpu.sh on a CPU partition - none of the remaining work touches
 # the GPU, so holding a GPU allocation for it would waste the reservation.
 # ==============================================================================
-DATASET_DIR="./datasets/batch_simulation_nyc"
 SCENE_DIR="./data/NYC3KM_585751_4512036"
 CELL_SIZE=10                # 3000 m / 10 m = 300 x 300, same cell as DeepMTL
 MAP_BOUNDS_B=1500
@@ -30,8 +29,10 @@ set -e
 mkdir -p logs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "${SCRIPT_DIR}/server_env.sh" ] && source "${SCRIPT_DIR}/server_env.sh"
-source ~/.bashrc
-conda activate "${CONDA_ENV_NAME:-sionna}" 2>/dev/null || [ -z "$CONDA_BIN_DIR" ] || export PATH="${CONDA_BIN_DIR}:$PATH"
+# after server_env.sh, so SIONNA_DATASET_ROOT is known
+DATASET_DIR="${DATASET_DIR:-${SIONNA_DATASET_ROOT:-./datasets}/batch_simulation_nyc}"
+sionna_activate_conda || exit 1
+echo "python: $(command -v python)"
 export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 
 echo "=== GPU check ==="
