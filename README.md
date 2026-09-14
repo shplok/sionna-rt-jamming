@@ -82,7 +82,7 @@ holding a GPU reservation through the CPU half would waste it.
 | `main_batch_cluster.py` | **Cluster** entry point: CLI, all dataset stages |
 | `requirements_local.txt` | Laptop / CPU deps — what the repo actually imports |
 | `requirements_cluster.txt` | Cluster deps — full `pip freeze`, Linux + CUDA 12.4 only |
-| `submit.sh` | Site-aware wrapper: `./submit.sh {show,smoke,gpu,cpu}` |
+| `submit.sh` | Site-aware wrapper: `./submit.sh {show,verify,smoke,gpu,cpu}` |
 | `run_pipeline_gpu.sh` | SLURM job — **ray tracing only**, needs a GPU |
 | `run_pipeline_cpu.sh` | SLURM job — everything after, **no GPU**, 64 GB RAM |
 | `run_pipeline.sh` | Luis's original single-job script (`eff898c4`), kept for reference |
@@ -216,19 +216,33 @@ in `server_env.sh`:
 The site is detected from the hostname, falling back to which partitions `sinfo` reports.
 Force it with `export SIONNA_SITE=explorer` (or `pomplun`).
 
-**Step 1 — check what it resolved.**
+**Step 1 — preflight.**
 
 ```bash
-./submit.sh show
+./submit.sh show       # resolved settings
+./submit.sh verify     # read-only: partitions, associations, GPU, python env, input data
 ```
 
-Sanity-check the partitions against `sinfo -o '%P %G %l'`. In particular **`short` is a guess
-for the Explorer CPU partition** — if that is wrong, `export SLURM_CPU_PARTITION=<yours>` or
-edit the profile. Every value is overridable:
+`verify` checks that the configured partitions actually exist, that `mitsuba` loads the CUDA
+variant, and that the scene data is present. Nothing it does writes to the dataset.
+
+In particular **`short` is a guess for the Explorer CPU partition** — if `verify` flags it,
+`export SIONNA_CPU_PARTITION=<yours>`. Every value is overridable:
 
 ```bash
-SLURM_GPU_GRES=gpu:h200:1 ./submit.sh gpu      # h200 instead of a100
+SIONNA_GPU_GRES=gpu:h200:1 ./submit.sh gpu     # h200 instead of a100
 ```
+
+Config lives in the `SIONNA_*` namespace, deliberately not `SLURM_*` — SLURM reads several
+`SLURM_*` variables as *input*, and inside an allocation they already hold the parent job's
+values.
+
+**Working from inside an `srun`?** That is the recommended way: grab an interactive GPU
+shell, run `verify` and `smoke` there, then submit the real jobs with `./submit.sh gpu` /
+`cpu`. `sbatch` works fine from inside an allocation — the submitted job queues
+independently. `submit.sh` strips the inherited `SLURM_*`/`SBATCH_*` job variables before
+submitting so the child does not inherit this shell's memory or task count, and `smoke`
+detects the allocation and runs in place rather than nesting an `srun`.
 
 **Step 2 — environment (once).**
 
@@ -240,15 +254,20 @@ python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print
 ```
 
 **Step 3 — smoke test the stage that has never run.** `simulate_static` is new code that has
-never touched a GPU. 20 positions is enough to exercise scene loading, the solver call, the
-memmap write and the checkpoint — about a minute:
+never touched a GPU. 20 positions exercises scene loading, the solver call, the memmap write
+and the checkpoint — about a minute. Needs a GPU, so run it from an interactive shell:
+
+```bash
+srun --partition=gpu --gres=gpu:a100:1 --nodes=1 --ntasks=1 --mem=16G --time=00:30:00 --pty bash
+```
 
 ```bash
 ./submit.sh smoke
 ```
 
 Expect `shape (20, 300, 300) float32`, a positive max, and `SMOKE TEST PASSED`. Then
-`rm -rf ./datasets/smoke_batch_simulation_test`.
+`rm -rf ./datasets/batch_simulation_smoke`. You can stay in that shell and submit steps 4–5
+from it.
 
 **Step 4 — the GPU job** (~1.5 h): trajectories, their radio maps, static positions, their
 radio maps.

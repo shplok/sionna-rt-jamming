@@ -2,17 +2,22 @@
 # ==============================================================================
 # Submit the pipeline, picking the SLURM settings for whichever cluster you are on.
 #
+#   ./submit.sh show         # print the resolved settings and exit
+#   ./submit.sh verify       # read-only preflight: partitions, env, GPU, data
+#   ./submit.sh smoke        # 20-position simulate_static test
 #   ./submit.sh gpu          # stage A: ray tracing            (needs a GPU)
 #   ./submit.sh cpu          # stage B: everything after       (no GPU)
-#   ./submit.sh smoke        # 20-position GPU smoke test, interactive
-#   ./submit.sh show         # print the resolved settings and exit
+#
+# Safe to run from inside an srun allocation: sbatch is just a client, and the
+# submitted job queues independently. Inherited SLURM_* job variables are stripped
+# before submitting so the child does not pick up this shell's memory/ntasks.
 #
 # #SBATCH directives inside a job script are static comments and cannot be made
 # conditional, so this wrapper passes the site-specific values on the sbatch command
 # line, where they override the in-file defaults.
 #
 # Override anything by exporting it first, e.g.
-#   SLURM_GPU_GRES=gpu:h200:1 ./submit.sh gpu
+#   SIONNA_GPU_GRES=gpu:h200:1 ./submit.sh gpu
 # ==============================================================================
 set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -21,7 +26,16 @@ source ./server_env.sh
 ACTION="${1:-show}"
 mkdir -p logs
 
-_acct() { [ -n "$SLURM_ACCOUNT" ] && echo "--account=$SLURM_ACCOUNT"; }
+_acct() { [ -n "$SIONNA_ACCOUNT" ] && echo "--account=$SIONNA_ACCOUNT"; }
+
+# Inside an allocation, SLURM_* describe THIS job and some are read as input by
+# sbatch/srun. Strip them so a submitted job gets only what we pass explicitly.
+_clean() {
+    env $(env | grep -oE '^(SLURM|SBATCH)_[A-Z0-9_]+' | sed 's/^/-u /' | tr '\n' ' ') "$@"
+}
+
+IN_ALLOC=""
+[ -n "$SLURM_JOB_ID" ] && IN_ALLOC="yes"
 
 case "$ACTION" in
 
@@ -29,31 +43,71 @@ case "$ACTION" in
     echo "site               : $SIONNA_SITE"
     echo "conda env / bin    : $CONDA_ENV_NAME  ($CONDA_BIN_DIR)"
     echo "mitsuba variant    : $MITSUBA_VARIANT"
-    echo "GPU  partition     : $SLURM_GPU_PARTITION"
-    echo "GPU  gres          : $SLURM_GPU_GRES"
-    echo "GPU  mem / time    : $SLURM_GPU_MEM / $SLURM_GPU_TIME"
-    echo "CPU  partition     : $SLURM_CPU_PARTITION"
-    echo "CPU  mem / time    : $SLURM_CPU_MEM / $SLURM_CPU_TIME"
-    echo "account            : ${SLURM_ACCOUNT:-<none>}"
+    echo "GPU  partition     : $SIONNA_GPU_PARTITION"
+    echo "GPU  gres          : $SIONNA_GPU_GRES"
+    echo "GPU  mem / time    : $SIONNA_GPU_MEM / $SIONNA_GPU_TIME"
+    echo "CPU  partition     : $SIONNA_CPU_PARTITION"
+    echo "CPU  mem / time    : $SIONNA_CPU_MEM / $SIONNA_CPU_TIME"
+    echo "account            : ${SIONNA_ACCOUNT:-<none>}"
+    echo
+    echo "inside an allocation : ${IN_ALLOC:-no}${SLURM_JOB_ID:+  (job $SLURM_JOB_ID)}"
     echo
     echo "If the partitions look wrong:  sinfo -o '%P %G %l'"
     ;;
 
+  verify)
+    # Read-only preflight. Nothing here writes to the dataset.
+    echo "--- site ---";          "$0" show
+    echo; echo "--- partitions available ---"
+    sinfo -o '%P %G %l %D' 2>/dev/null | head -20 || echo "sinfo unavailable"
+    echo; echo "--- does the configured GPU partition exist? ---"
+    if sinfo -h -p "$SIONNA_GPU_PARTITION" -o '%P %G' 2>/dev/null | grep -q .; then
+        echo "  OK   $SIONNA_GPU_PARTITION"
+    else
+        echo "  BAD  partition '$SIONNA_GPU_PARTITION' not found -- set SIONNA_GPU_PARTITION"
+    fi
+    if sinfo -h -p "$SIONNA_CPU_PARTITION" -o '%P' 2>/dev/null | grep -q .; then
+        echo "  OK   $SIONNA_CPU_PARTITION"
+    else
+        echo "  BAD  partition '$SIONNA_CPU_PARTITION' not found -- set SIONNA_CPU_PARTITION"
+    fi
+    echo; echo "--- your associations ---"
+    sacctmgr -n show assoc user="$USER" format=account,partition 2>/dev/null | head || echo "  n/a"
+    echo; echo "--- GPU visible here? ---"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null \
+        || echo "  no GPU in this shell (fine if you are on a login node)"
+    echo; echo "--- python env ---"
+    python -c "import numpy, trimesh; print('  numpy', numpy.__version__, '| trimesh', trimesh.__version__)" 2>&1 | tail -1
+    python -c "
+import mitsuba as mi
+mi.set_variant('$MITSUBA_VARIANT'); print('  mitsuba variant:', mi.variant())
+import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
+    echo; echo "--- input data ---"
+    for d in ./data/NYC3KM_585751_4512036/simple_OSM_scene.xml ./data/NYC3KM_585751_4512036/mesh; do
+        [ -e "$d" ] && echo "  OK   $d" || echo "  BAD  missing $d"
+    done
+    n=$(ls ./datasets/batch_simulation_nyc/single_trajectory_jammers/traj_*.npy 2>/dev/null | wc -l)
+    echo "  $n trajectory .npy files present (54 expected; 0 is fine, stage A1 makes them)"
+    echo; echo "--- disk ---"; df -h . | tail -1
+    ;;
+
   gpu)
-    echo "[submit] $SIONNA_SITE -> $SLURM_GPU_PARTITION / $SLURM_GPU_GRES"
-    sbatch --partition="$SLURM_GPU_PARTITION" \
-           --gres="$SLURM_GPU_GRES" \
-           --mem="$SLURM_GPU_MEM" \
-           --time="$SLURM_GPU_TIME" \
+    echo "[submit] $SIONNA_SITE -> $SIONNA_GPU_PARTITION / $SIONNA_GPU_GRES"
+    [ -n "$IN_ALLOC" ] && echo "[submit] submitting from inside job $SLURM_JOB_ID (fine)"
+    _clean sbatch --partition="$SIONNA_GPU_PARTITION" \
+           --gres="$SIONNA_GPU_GRES" \
+           --mem="$SIONNA_GPU_MEM" \
+           --time="$SIONNA_GPU_TIME" \
            $(_acct) \
            run_pipeline_gpu.sh
     ;;
 
   cpu)
-    echo "[submit] $SIONNA_SITE -> $SLURM_CPU_PARTITION (no GPU)"
-    sbatch --partition="$SLURM_CPU_PARTITION" \
-           --mem="$SLURM_CPU_MEM" \
-           --time="$SLURM_CPU_TIME" \
+    echo "[submit] $SIONNA_SITE -> $SIONNA_CPU_PARTITION (no GPU)"
+    [ -n "$IN_ALLOC" ] && echo "[submit] submitting from inside job $SLURM_JOB_ID (fine)"
+    _clean sbatch --partition="$SIONNA_CPU_PARTITION" \
+           --mem="$SIONNA_CPU_MEM" \
+           --time="$SIONNA_CPU_TIME" \
            $(_acct) \
            run_pipeline_cpu.sh
     ;;
@@ -61,11 +115,17 @@ case "$ACTION" in
   smoke)
     # 20 positions is enough to prove simulate_static works end to end: it exercises
     # scene loading, the solver call, the memmap write and the progress checkpoint.
-    DS="./datasets/smoke_batch_simulation_test"
-    echo "[submit] interactive smoke test on $SLURM_GPU_PARTITION / $SLURM_GPU_GRES"
-    srun --partition="$SLURM_GPU_PARTITION" --gres="$SLURM_GPU_GRES" \
-         --nodes=1 --ntasks=1 --mem="$SLURM_GPU_MEM" --time=00:30:00 $(_acct) \
-         bash -c "
+    DS="./datasets/batch_simulation_smoke"
+    if [ -n "$IN_ALLOC" ]; then
+        echo "[submit] already inside job $SLURM_JOB_ID -- running the smoke test here"
+        RUNNER=(bash -c)
+    else
+        echo "[submit] smoke test via srun on $SIONNA_GPU_PARTITION / $SIONNA_GPU_GRES"
+        RUNNER=(srun --partition="$SIONNA_GPU_PARTITION" --gres="$SIONNA_GPU_GRES"
+                --nodes=1 --ntasks=1 --mem="$SIONNA_GPU_MEM" --time=00:30:00 $(_acct)
+                bash -c)
+    fi
+    "${RUNNER[@]}" "
             source ~/.bashrc
             conda activate ${CONDA_ENV_NAME:-sionna} 2>/dev/null || export PATH=\"$CONDA_BIN_DIR:\$PATH\"
             export MITSUBA_VARIANT=$MITSUBA_VARIANT
@@ -89,7 +149,7 @@ PY
     ;;
 
   *)
-    echo "usage: ./submit.sh {gpu|cpu|smoke|show}" >&2
+    echo "usage: ./submit.sh {show|verify|smoke|gpu|cpu}" >&2
     exit 2
     ;;
 esac
