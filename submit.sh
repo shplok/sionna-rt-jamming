@@ -88,13 +88,21 @@ import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
     done
     n=$(ls ./datasets/batch_simulation_nyc/single_trajectory_jammers/traj_*.npy 2>/dev/null | wc -l)
     echo "  $n trajectory .npy files present (54 expected; 0 is fine, stage A1 makes them)"
-    echo; echo "--- conda ---"
-    if [ -n "$CONDA_SH" ] && [ -f "$CONDA_SH" ]; then echo "  OK   hook $CONDA_SH"
-    else echo "  BAD  no conda hook at '$CONDA_SH' -- set CONDA_SH to your"
-         echo "       <miniconda>/etc/profile.d/conda.sh"; fi
-    ( sionna_activate_conda >/dev/null 2>&1 && echo "  OK   activated '$CONDA_ENV_NAME' -> $(command -v python)" ) \
-        || echo "  BAD  could not activate '$CONDA_ENV_NAME'"
-    conda env list 2>/dev/null | sed 's/^/       /' | head -8 || true
+    echo; echo "--- python environment ---"
+    if [ -f "$SIONNA_VENV/bin/activate" ]; then
+        echo "  OK   venv $SIONNA_VENV"
+        base=$(grep -E '^home' "$SIONNA_VENV/pyvenv.cfg" 2>/dev/null | cut -d= -f2- | xargs)
+        echo "       interpreter source: ${base:-?}"
+        case "$base" in
+          "$HOME"*) echo "  WARN base interpreter is under \$HOME -- the venv breaks if that"
+                    echo "       install is removed. Prefer one under /projects." ;;
+        esac
+    else
+        echo "  BAD  no venv at $SIONNA_VENV -- create it with:"
+        echo "       <py311>/bin/python3.11 -m venv $SIONNA_VENV"
+    fi
+    ( sionna_activate_env >/dev/null 2>&1 && echo "  OK   activated -> $(command -v python) ($(python -V 2>&1))" ) \
+        || echo "  BAD  could not activate any environment"
 
     echo; echo "--- home quota (conda and pip fail obscurely when this is full) ---"
     q="$( { quota -s 2>/dev/null || lfs quota -h -u "$USER" "$HOME" 2>/dev/null; } | tail -3 )"

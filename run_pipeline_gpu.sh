@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "${SCRIPT_DIR}/server_env.sh" ] && source "${SCRIPT_DIR}/server_env.sh"
 # after server_env.sh, so SIONNA_DATASET_ROOT is known
 DATASET_DIR="${DATASET_DIR:-${SIONNA_DATASET_ROOT:-./datasets}/batch_simulation_nyc}"
-sionna_activate_conda || exit 1
+sionna_activate_env || exit 1
 echo "python: $(command -v python)"
 export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 

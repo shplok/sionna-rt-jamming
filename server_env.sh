@@ -14,6 +14,9 @@
 # own namespace keeps the two from fighting.
 # ==============================================================================
 
+# repo root, so SIONNA_VENV can default to <repo>/.venv regardless of cwd
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+
 _sionna_detect_site() {
     [ -n "$SIONNA_SITE" ] && { echo "$SIONNA_SITE"; return; }
     local h; h="$(hostname -f 2>/dev/null || hostname)"
@@ -37,6 +40,11 @@ case "$SIONNA_SITE" in
     # BOTH miniconda and the dataset live under /projects/ipl_lab. The separate
     # miniconda in $HOME (grpo-motion etc.) is left alone -- do not use it here.
     export SIONNA_PROJ="${SIONNA_PROJ:-/projects/ipl_lab/$USER}"
+    # A venv in the repo, not a conda env. Everything here is pip-installable, and
+    # `source .venv/bin/activate` behaves identically in a login shell and a batch
+    # job -- unlike `conda activate`, which needs a shell hook that is often absent
+    # inside SLURM. miniconda under $SIONNA_PROJ is only the interpreter source.
+    export SIONNA_VENV="${SIONNA_VENV:-$SCRIPT_DIR/.venv}"
     export CONDA_ENV_NAME="${CONDA_ENV_NAME:-sionna}"
     export CONDA_SH="${CONDA_SH:-$SIONNA_PROJ/miniconda3/etc/profile.d/conda.sh}"
     export CONDA_BIN_DIR="${CONDA_BIN_DIR:-$SIONNA_PROJ/miniconda3/envs/sionna/bin}"
@@ -86,10 +94,16 @@ export SIONNA_GPU_TIME="${SIONNA_GPU_TIME:-04:00:00}"
 export SIONNA_CPU_TIME="${SIONNA_CPU_TIME:-08:00:00}"
 export SIONNA_SITE
 
-# Activate the environment the way the caller's shell can actually do it. `conda
-# activate` only works after conda's shell hook has been sourced, which is not
-# guaranteed inside a batch job even when it works interactively.
-sionna_activate_conda() {
+# Activate the project environment. A venv is tried first: `source bin/activate` is
+# a plain shell script and works the same in an interactive shell and a batch job,
+# whereas `conda activate` needs conda's shell hook, which is frequently not sourced
+# inside SLURM even when it works when you log in. Conda is kept as a fallback for
+# sites that use it.
+sionna_activate_env() {
+    if [ -n "$SIONNA_VENV" ] && [ -f "$SIONNA_VENV/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "$SIONNA_VENV/bin/activate" && return 0
+    fi
     if [ -n "$CONDA_SH" ] && [ -f "$CONDA_SH" ]; then
         # shellcheck disable=SC1090
         source "$CONDA_SH" && conda activate "${CONDA_ENV_NAME:-sionna}" && return 0
@@ -100,8 +114,11 @@ sionna_activate_conda() {
     if [ -d "$CONDA_BIN_DIR" ]; then
         export PATH="$CONDA_BIN_DIR:$PATH" && return 0
     fi
-    echo "[server_env] ERROR: could not activate '${CONDA_ENV_NAME}'." >&2
-    echo "[server_env]   tried CONDA_SH=$CONDA_SH" >&2
-    echo "[server_env]   tried CONDA_BIN_DIR=$CONDA_BIN_DIR" >&2
+    echo "[server_env] ERROR: no environment found." >&2
+    echo "[server_env]   venv : $SIONNA_VENV/bin/activate" >&2
+    echo "[server_env]   conda: $CONDA_SH  (env '${CONDA_ENV_NAME}')" >&2
     return 1
 }
+
+# backwards-compatible alias
+sionna_activate_conda() { sionna_activate_env "$@"; }
