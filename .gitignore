@@ -6,8 +6,14 @@ __pycache__/
 .osm
 .xml
 
-# data
-datasets/
+# data -- generated datasets are never versioned, but each dataset's README IS: it
+# is the design document for the pipeline. A trailing-slash `datasets/` stops git
+# descending into the directory at all, so the negations need `datasets/*`, and the
+# contents then have to be re-ignored before un-ignoring just the README.
+datasets/*
+!datasets/*/
+datasets/*/*
+!datasets/*/README.md
 cache/
 data/*
 !data/clean_xml.py
