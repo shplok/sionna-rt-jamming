@@ -12,7 +12,7 @@ Two entry points, for two different machines:
 | **Batch** | `main_batch_cluster.py` | **GPU cluster only** | Generate the full dataset headless, via `sbatch run_pipeline.sh`. |
 
 **The batch pipeline is cluster-only by design.** Ray tracing the base maps needs a CUDA
-GPU, and the finished dataset is ~46 GB — neither fits on a laptop. Only the interactive
+GPU, and the finished dataset is ~96 GB — neither fits on a laptop. Only the interactive
 entry point is meant to run locally.
 
 The dataset itself is documented separately, in
@@ -44,7 +44,7 @@ So every stage is either **[GPU] ray trace one jammer at a time**, or **[CPU] su
 
 ```
             [GPU]  ray trace                    [CPU]  sum K of them
-TRACKING    54 trajectories, one map/frame  ->  5 000 scenarios      (46 GB)
+TRACKING    54 trajectories, one map/frame  ->  5 000 scenarios      (69 GB)
 DETECTION   20 000 static positions         ->  100 000 samples      (18 GB)
 ```
 
@@ -57,7 +57,7 @@ scatter over the whole street network.
 It also keeps the two models honest: the detector never sees a trajectory frame, so the
 detections it feeds to the tracker are **out-of-sample by construction**.
 
-**Total: ~1.5 h of GPU, then everything else on CPU.** About 73 GB of output.
+**Total: ~1.5 h of GPU, then everything else on CPU.** About 96 GB of output.
 
 ---
 
@@ -250,7 +250,7 @@ Working layout:
     ├── pip-cache/  .cache/
     └── sionna-rt-jamming/
         ├── .venv/                  ~6 GB, gitignored
-        └── datasets/               ~73 GB, gitignored
+        └── datasets/               ~96 GB, gitignored
 ```
 
 ### ⚠️ Explorer needs a patched drjit (OptiX PTX bug)
@@ -382,7 +382,7 @@ call `sionna_activate_conda` from `server_env.sh`, which sources `$CONDA_SH` fir
 back to `conda` on `PATH`, then to `$CONDA_BIN_DIR`, and fails loudly rather than silently
 running against the wrong Python.
 
-**⚠️ Where the dataset lands.** The run writes **~73 GB**, which will blow a typical home
+**⚠️ Where the dataset lands.** The run writes **~96 GB**, which will blow a typical home
 quota. The `explorer` profile therefore points `SIONNA_DATASET_ROOT` at
 `/projects/ipl_lab/$USER/sionna-rt-jamming/datasets`, not at the repo. `./submit.sh verify`
 checks that it is writable, reports free space, and warns if the root looks like `$HOME` or

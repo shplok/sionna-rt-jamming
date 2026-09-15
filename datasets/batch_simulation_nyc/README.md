@@ -278,10 +278,10 @@ A 90-frame cube at 300 × 300 float16 is **16.2 MB**. Measured totals for 4000/5
 
 | | full cubes | 10 sampled frames/scenario |
 |---|---|---|
-| 5000 scenarios | **~46 GB** | **~9 GB** (50 000 snapshots) |
+| 5000 scenarios | **~69 GB** | **~9 GB** (50 000 snapshots) |
 
 Tracking needs the full cubes; detection needs only the sampled frames. Write them as two
-sets rather than slicing 46 GB at train time. Always pass `--skip-gif` — GIFs are ~25 MB
+sets rather than slicing 69 GB at train time. Always pass `--skip-gif` — GIFs are ~25 MB
 each and would roughly double everything.
 
 ---
@@ -393,7 +393,7 @@ ray-traced value.
 
 **The RSS is stored dense, on the full grid.** Sub-sampling to sensors happens in
 preprocessing, using `splits.json`. That keeps sensor density and placement free parameters
-that can change without regenerating 46 GB.
+that can change without regenerating 69 GB.
 
 What `splits.json` fixes, and why it is data rather than preprocessing:
 
@@ -526,7 +526,7 @@ Everything derives from `--dataset-dir`. **Only the two `simulate_*` stages need
 | 4 | `simulate_static` | **GPU** | ~78 min at N=20 000 |
 | 5 | `scripts/make_splits.py` | CPU | ~2 min |
 | 6 | `scripts/make_labels.py` | CPU | seconds |
-| 7 | `aggregate` | CPU | ~46 GB out |
+| 7 | `aggregate` | CPU | ~69 GB out |
 | 8 | `aggregate_static` | CPU | ~18 GB out |
 | 9 | `scripts/validate_dataset.py` | CPU | minutes |
 
@@ -596,7 +596,7 @@ every shape, dtype and index path is real):
 | Throughput | 3.55 positions/s, 94 min for the static library |
 | Variant | `cuda_ad_mono_polarized` — real CUDA, via the patched drjit (see repo README) |
 
-- [ ] `./submit.sh cpu` — ~64 GB out, ends with `validate_dataset.py`
+- [x] `./submit.sh cpu` — job 10361058 on Explorer, completed 2026-09-15, 13/13 validation checks passed; ~96 GB total on disk
 
 **Deferred, flagged in place.**
 
