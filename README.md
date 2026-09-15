@@ -116,16 +116,10 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements_local.txt
 ```
 
-Then force the CPU Mitsuba variant — the code defaults to CUDA and only falls back on
-failure, so setting this explicitly avoids a confusing warning on every run:
+Force the CPU Mitsuba variant (the code defaults to CUDA and only falls back on failure):
 
 ```bash
 export MITSUBA_VARIANT=llvm_ad_mono_polarized
-```
-
-Verify:
-
-```bash
 python -c "import mitsuba as mi; mi.set_variant('llvm_ad_mono_polarized'); \
            import sionna.rt; print('OK:', mi.variant())"
 ```
@@ -137,14 +131,9 @@ conda activate sionna
 python main_interactive_local.py
 ```
 
-1. **Select mode** — Individual or Batch.
-2. **Individual** — per jammer, choose a strategy (Math Modeling or Waypoint), time step and
-   padding mode, then plan on the map. In the Math planner use **Change initial jammer
-   position** *before* adding any segment; the clicked position is written back into
-   `main_interactive_local.py`.
-3. **Batch** — set graph parameters, build the navigation graph, generate `N` paths.
-4. The tool saves trajectories, runs the radio-map simulation (slow on CPU), and writes to
-   `datasets/<DATASET_NAME>/`.
+1. **Individual mode** — choose a strategy (Math Modeling or Waypoint), time step, and padding mode, then plan on the map. In the Math planner, use **Change initial jammer position** *before* adding any segment — it writes the clicked position back into `main_interactive_local.py`.
+2. **Batch mode** — set graph parameters, build the navigation graph, generate `N` paths.
+3. Saves trajectories, runs simulation (slow on CPU), writes to `datasets/<DATASET_NAME>/`.
 
 ### Configure
 
@@ -162,16 +151,7 @@ Edit the constants at the top of `main_interactive_local.py`:
 | `b` / `map_bounds` | Square region `[-b, b]` — currently **750**, i.e. the central 1.5 km |
 | `cell_size` | Grid resolution, currently `(8, 8)` m |
 
-> **⚠️ Known mismatch, deliberately left open.** This script uses `b = 750` and
-> `cell_size = (8, 8)` while pointing at the 3 km scene, so it covers the central 1.5 km at
-> 8 m — a 188 × 188 grid. The batch pipeline uses ±1500 m and 10 m cells → 300 × 300.
->
-> **Its output is therefore not comparable with `datasets/batch_simulation_*`** and must not
-> be mixed into training or into figures that also use batch data. Fine for interactive
-> exploration, which is all this entry point is for.
->
-> Aligning is two lines (`b = 1500`, `cell_size = (10, 10)`), flagged with a `TODO` at the
-> top of `main()`. Tracked in the dataset README's status list.
+> **⚠️ Known mismatch.** `b = 750`, `cell_size = (8, 8)` → 188 × 188 grid covering the central 1.5 km at 8 m. The batch pipeline uses ±1500 m / 10 m → 300 × 300. **Output is not comparable with `datasets/batch_simulation_*`**; do not mix into training or figures. Fine for interactive exploration only. Fix is two lines (`b = 1500`, `cell_size = (10, 10)`), flagged with a TODO in `main()`.
 
 ### Output
 
@@ -202,9 +182,7 @@ The whole dataset is built here. Two SLURM jobs: ray tracing (GPU), then everyth
 
 ### ⚠️ Northeastern Explorer: the home quota will bite you
 
-**Read this before installing anything.** Explorer gives each user a small quota on
-`/home`, separate from the lab's 35 TB on `/projects`. That quota is easy to fill — a
-single miniconda install is ~43 GB — and when it is full the failures are **misleading**:
+Explorer gives each user a small quota on `/home` (separate from the lab's 35 TB on `/projects`). A single miniconda install is ~43 GB. When it fills, failures are **misleading**:
 
 | What you see | What it actually is |
 |---|---|
@@ -214,8 +192,7 @@ single miniconda install is ~43 GB — and when it is full the failures are **mi
 | `Could not save font_manager cache` | matplotlib font cache |
 | **Claude Code 401 loops after `/login` succeeds** | it cannot persist the refreshed OAuth token to `~/.claude/` |
 
-`df -h /home` is **not** the check — it shows the filesystem (110 TB free), not your
-quota. Test writability instead:
+`df -h /home` shows the filesystem (110 TB free), **not your quota**. Test writability:
 
 ```bash
 touch ~/.quota_test && rm ~/.quota_test && echo "home OK" || echo "HOME FULL"
@@ -223,22 +200,15 @@ touch ~/.quota_test && rm ~/.quota_test && echo "home OK" || echo "HOME FULL"
 
 **Rules for this project on Explorer**
 
-1. **Everything lives on `/projects/ipl_lab`** — the repo, miniconda, the venv, the
-   dataset. Nothing on `/home`.
-2. **`server_env.sh` redirects what it can** — `XDG_CACHE_HOME`, `PIP_CACHE_DIR`,
-   `MPLCONFIGDIR`, `CONDA_PKGS_DIRS` — automatically, whenever `SIONNA_PROJ` exists.
-3. **conda's internal writes cannot be redirected by a variable.** For any `conda`
-   command, override `HOME` for that command only:
+1. **Everything on `/projects/ipl_lab`** — repo, miniconda, venv, dataset. Nothing on `/home`.
+2. **`server_env.sh` redirects what it can** (`XDG_CACHE_HOME`, `PIP_CACHE_DIR`, `MPLCONFIGDIR`, `CONDA_PKGS_DIRS`) automatically when `SIONNA_PROJ` is set.
+3. **conda's internal writes can't be redirected.** Override `HOME` per command:
    ```bash
    mkdir -p /projects/ipl_lab/$USER/conda-home
    HOME=/projects/ipl_lab/$USER/conda-home bash Miniconda3-py311_*-Linux-x86_64.sh -b -p /projects/ipl_lab/miniconda3
    ```
-4. **drjit's kernel cache has no override** — it is derived from `$HOME`. When home is
-   full it disables the disk cache and says so. That costs compile time, not
-   correctness. The only fix is free space.
-5. **Keep some home space free anyway.** Claude Code, SLURM and your shell all need it.
-   `conda clean --all -y` on the home miniconda deletes only the download cache, never
-   environments, and usually recovers 10–20 GB.
+4. **drjit kernel cache** is derived from `$HOME` and can't be overridden. If home fills, it disables the disk cache (costs compile time, not correctness). Only fix: free space.
+5. **Keep some home space free** — Claude Code, SLURM, and your shell need it. `conda clean --all -y` recovers 10–20 GB from the download cache without touching environments.
 
 Working layout:
 
@@ -264,19 +234,10 @@ jit_optix_compile(): optixModuleGetCompilationState() indicates that the compila
 did not complete successfully. State: 0x2363
 ```
 
-**Cause.** drjit 1.5.0 emits a `copysign.f32` PTX instruction. OptiX's module compiler
-translates it to `optix.ptx.copysign.f32`, and support for lowering that intrinsic
-**landed in NVIDIA driver 572.46**. Explorer is behind that floor on every GPU type:
-
-| GPU | driver |
-|---|---|
-| H200 | 570.86.15 |
-| A100-SXM4-80GB | 570.86.15 |
-| T4 | 570.86.15 |
-| V100-PCIE | 545.23.08 |
-
-So the driver is **too old**, not too new. This resolves itself if Explorer updates to
-≥ 572.46, at which point the patch below becomes unnecessary (but harmless).
+**Cause.** drjit 1.5.0 emits a `copysign.f32` PTX instruction that OptiX translates to
+`optix.ptx.copysign.f32`. Support landed in **NVIDIA driver 572.46**; Explorer's A100 and
+H200 nodes are on 570.86.15 — too old. The patch becomes unnecessary if Explorer updates
+to ≥ 572.46 (but is harmless to leave in).
 
 **Fix.** `patches/drjit-core-copysign-optix.patch` replaces the instruction with
 equivalent bit manipulation — mask the magnitude, mask the sign, OR them. It is
@@ -307,36 +268,30 @@ srun --partition=gpu --gres=gpu:a100:1 --mem=8G --time=00:10:00      ./scripts/s
 `drjit==1.5.0` and `mitsuba==3.9.1`, so downgrading either breaks the install.
 
 <details>
-<summary>Four approaches that do not work (so nobody repeats them)</summary>
+<summary>Approaches that do not work (so nobody repeats them)</summary>
 
 | Attempt | Why it fails |
 |---|---|
 | Downgrade to mitsuba 3.6 / drjit 1.0.1 | sionna-rt 2.1.0 hard-pins drjit 1.5.0 and mitsuba 3.9.1; pip resolves back or the install breaks |
 | `dr.set_flag(dr.JitFlag.ShaderExecutionReordering, False)` | The intrinsic is not SER-specific. Tested: still aborts. |
 | `LD_PRELOAD` shim to rewrite the PTX | drjit `dlopen`s OptiX and resolves symbols via `dlsym`, so `LD_PRELOAD` interposition never sees the call — `RTLD_NEXT` returns NULL and the shim segfaults (exit 139) |
-| Run on V100 (driver 545, pre-new-backend) | Does not abort, but OptiX compilation never finished inside an hour for this scene. Not viable for 20 000 positions. |
 
-CPU/LLVM fallback works and is numerically correct, but measured 22 s per position —
-about 120 h for the static library alone.
+CPU/LLVM fallback is numerically correct but measured 22 s per position — ~120 h for the static library.
 
 </details>
 
 ### Submitting on the cluster
 
-`./submit.sh` picks the SLURM settings for whichever cluster you are on. Two profiles live
-in `server_env.sh`:
+`./submit.sh` picks SLURM settings per site. Two profiles in `server_env.sh`:
 
 | | `explorer` | `pomplun` |
 |---|---|---|
-| Whose | Mariona (Northeastern Explorer) | Luis's original, left as pulled |
 | GPU partition / gres | `gpu` / `gpu:a100:1` | `pomplun` / `gpu:1` |
 | CPU partition | `short` | `pomplun` |
 | Account | none | `cs_tales.imbiriba` |
-| Conda hook | `$HOME/miniconda3/etc/profile.d/conda.sh` | `/pomplun/share_home/l.gonzalezgudino001/...` |
 | Dataset root | `/projects/ipl_lab/$USER/sionna-rt-jamming/datasets` | `./datasets` |
 
-The site is detected from the hostname, falling back to which partitions `sinfo` reports.
-Force it with `export SIONNA_SITE=explorer` (or `pomplun`).
+Site is auto-detected from hostname; force with `export SIONNA_SITE=explorer` (or `pomplun`).
 
 **Step 1 — preflight.**
 
@@ -345,26 +300,17 @@ Force it with `export SIONNA_SITE=explorer` (or `pomplun`).
 ./submit.sh verify     # read-only: partitions, associations, GPU, python env, input data
 ```
 
-`verify` checks that the configured partitions actually exist, that `mitsuba` loads the CUDA
-variant, and that the scene data is present. Nothing it does writes to the dataset.
+`verify` checks partitions exist, mitsuba loads the CUDA variant, and scene data is present. It writes nothing.
 
-In particular **`short` is a guess for the Explorer CPU partition** — if `verify` flags it,
-`export SIONNA_CPU_PARTITION=<yours>`. Every value is overridable:
+`short` is the default Explorer CPU partition — if `verify` flags it, `export SIONNA_CPU_PARTITION=<yours>`. Every value is overridable:
 
 ```bash
-SIONNA_GPU_GRES=gpu:h200:1 ./submit.sh gpu     # h200 instead of a100
+SIONNA_GPU_GRES=gpu:h200:1 ./submit.sh gpu     # H200 instead of A100
 ```
 
-Config lives in the `SIONNA_*` namespace, deliberately not `SLURM_*` — SLURM reads several
-`SLURM_*` variables as *input*, and inside an allocation they already hold the parent job's
-values.
+Config is in the `SIONNA_*` namespace (not `SLURM_*` — inside an allocation those already hold the parent job's values).
 
-**Working from inside an `srun`?** That is the recommended way: grab an interactive GPU
-shell, run `verify` and `smoke` there, then submit the real jobs with `./submit.sh gpu` /
-`cpu`. `sbatch` works fine from inside an allocation — the submitted job queues
-independently. `submit.sh` strips the inherited `SLURM_*`/`SBATCH_*` job variables before
-submitting so the child does not inherit this shell's memory or task count, and `smoke`
-detects the allocation and runs in place rather than nesting an `srun`.
+**Recommended workflow:** grab an interactive GPU shell, run `verify` and `smoke` there, then submit with `./submit.sh gpu` / `cpu`. `sbatch` works fine from inside an allocation. `submit.sh` strips inherited `SLURM_*`/`SBATCH_*` variables so the child doesn't inherit this shell's memory or task count.
 
 **Step 2 — environment (once).**
 
@@ -376,11 +322,7 @@ pip install -r requirements_cluster.txt
 python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print(mi.variant())"
 ```
 
-`conda activate` only works after conda's shell hook has been sourced, which is **not**
-guaranteed inside a batch job even when it works in your login shell. The pipeline scripts
-call `sionna_activate_conda` from `server_env.sh`, which sources `$CONDA_SH` first, falls
-back to `conda` on `PATH`, then to `$CONDA_BIN_DIR`, and fails loudly rather than silently
-running against the wrong Python.
+`conda activate` requires the shell hook to be sourced first — not guaranteed in batch jobs. Pipeline scripts call `sionna_activate_conda` from `server_env.sh`, which sources `$CONDA_SH`, falls back to `conda` on `PATH`, then `$CONDA_BIN_DIR`, and fails loudly rather than silently using the wrong Python.
 
 **⚠️ Where the dataset lands.** The run writes **~96 GB**, which will blow a typical home
 quota. The `explorer` profile therefore points `SIONNA_DATASET_ROOT` at
@@ -388,40 +330,30 @@ quota. The `explorer` profile therefore points `SIONNA_DATASET_ROOT` at
 checks that it is writable, reports free space, and warns if the root looks like `$HOME` or
 the repo. Override with `export SIONNA_DATASET_ROOT=/your/project/space`.
 
-**Step 3 — smoke test the stage that has never run.** `simulate_static` is new code that has
-never touched a GPU. 20 positions exercises scene loading, the solver call, the memmap write
-and the checkpoint — about a minute. Needs a GPU, so run it from an interactive shell:
+**Step 3 — smoke test.** Exercises scene loading, solver call, memmap write, and checkpoint (~1 min). Run from an interactive GPU shell:
 
 ```bash
 srun --partition=gpu --gres=gpu:a100:1 --nodes=1 --ntasks=1 --mem=16G --time=00:30:00 --pty bash
-```
-
-```bash
 ./submit.sh smoke
 ```
 
-Expect `shape (20, 300, 300) float32`, a positive max, and `SMOKE TEST PASSED`. Then
-`rm -rf ./datasets/batch_simulation_smoke`. You can stay in that shell and submit steps 4–5
-from it.
+Expect `shape (20, 300, 300) float32`, positive max, `SMOKE TEST PASSED`. Then `rm -rf ./datasets/batch_simulation_smoke`. You can submit steps 4–5 from that same shell.
 
-**Step 4 — the GPU job** (~1.5 h): trajectories, their radio maps, static positions, their
-radio maps.
+**Step 4 — GPU job** (~1.5 h): trajectories + radio maps, static positions + radio maps.
 
 ```bash
 ./submit.sh gpu
-squeue -u $USER
 tail -f logs/gpu_<jobid>.out
 ```
 
-**Step 5 — the CPU job**, only after step 4 finishes. No GPU; writes ~64 GB.
+**Step 5 — CPU job**, only after step 4 finishes. No GPU; writes ~87 GB.
 
 ```bash
 ./submit.sh cpu
 tail -f logs/cpu_<jobid>.out
 ```
 
-It ends with `validate_dataset.py`, which exits non-zero on failure — so a bad dataset fails
-the job rather than sitting there looking finished.
+Ends with `validate_dataset.py` (non-zero exit on failure).
 
 **Step 6 — confirm.**
 
@@ -480,7 +412,7 @@ sbatch run_pipeline_cpu.sh     # B1 splits.json        [CPU]
                                # B4 validate_dataset.py           [CPU]
 ```
 
-Tunables live in the parameter block at the top of each script. The same thing by hand, if you want to run stages individually:
+Tunables are at the top of each script. To run stages individually:
 
 ```bash
 DS=./datasets/batch_simulation_nyc
@@ -512,25 +444,15 @@ python main_batch_cluster.py --action aggregate_static --dataset-dir $DS \
 python scripts/validate_dataset.py --dataset-dir $DS
 ```
 
-**Ordering matters in one place:** `make_splits.py` reads
-`single_static_jammers/positions.npy` to plan the detector samples, so it must run *after*
-`generate_static`. If that file is missing it skips the detection branch with a warning
-rather than failing.
+**Ordering:** `make_splits.py` reads `single_static_jammers/positions.npy`, so it must run *after* `generate_static`. Missing file → detection branch silently skipped with a warning.
 
 ### Watch out for
 
-- **`--skip-gif` is not optional at scale.** GIFs are ~25 MB per scenario and would roughly
-  double the dataset.
-- **`simulate_bases` resumes by filename only** and does *not* check the grid. If you change
-  `--cell-size`, **delete `single_trajectory_jammers/radio_maps/` first** or it will silently
-  keep the old maps. `traj_*.npy` is grid-independent and should be kept. (`simulate_static`
-  and both aggregate stages *do* check, and refuse to run against a mismatched library.)
-- **`simulate_static` checkpoints every 50 positions** to `watts.progress.json` and resumes,
-  so a preempted 78-minute job does not start over.
-- **RAM, not compute, is the CPU-side constraint.** `aggregate` holds one trajectory pool
-  (~1.4 GB); `aggregate_static` memmaps the 7.2 GB static library.
-- **`datasets/` is gitignored.** Nothing generated here is version-controlled; move results
-  off the node yourself.
+- **`--skip-gif` is mandatory at scale** — GIFs are ~25 MB each and would roughly double the dataset.
+- **`simulate_bases` resumes by filename only** — it does *not* check the grid. If you change `--cell-size`, **delete `single_trajectory_jammers/radio_maps/` first** or stale maps survive silently. (`traj_*.npy` is grid-independent; keep it. `simulate_static` and both aggregate stages *do* check and refuse mismatched libraries.)
+- **`simulate_static` checkpoints every 50 positions** to `watts.progress.json` — a preempted job resumes rather than restarting.
+- **RAM is the CPU-side constraint:** `aggregate` holds one pool (~1.4 GB); `aggregate_static` memmaps the 7.2 GB static library.
+- **`datasets/` is gitignored** — move results off the node yourself.
 
 ---
 
@@ -563,14 +485,9 @@ Preprocessing, all cheap and all pure functions of the above:
 
 ### The one methodological rule
 
-Train the detector on `multi_static_jammers`, then run it over `multi_trajectory_jammers` to
-produce the detections the tracker's measurement model learns from. Because the two libraries
-are disjoint, those detections are **out-of-sample by construction** — no cross-fitting
-needed, and the false-positive statistics the model learns are the ones it will meet at test
-time. Do not train the tracker on detections from scenarios the detector was fitted to.
+Train the detector on `multi_static_jammers`, then run it over `multi_trajectory_jammers`. Because the two libraries are disjoint, detections fed to the tracker are **out-of-sample by construction** — no cross-fitting, and false-positive statistics are honest. Do not train the tracker on detections from scenarios the detector was fitted to.
 
-Reasoning and file formats in full: the
-[dataset README](datasets/batch_simulation_nyc/README.md).
+Full rationale and file formats: [dataset README](datasets/batch_simulation_nyc/README.md).
 
 ---
 
