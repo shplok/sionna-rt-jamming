@@ -253,6 +253,74 @@ Working layout:
         └── datasets/               ~73 GB, gitignored
 ```
 
+### ⚠️ Explorer needs a patched drjit (OptiX PTX bug)
+
+**Symptom.** `--action simulate_bases` or `simulate_static` aborts with `SIGABRT`
+(exit 134) a second or two into the first `RadioMapSolver` call:
+
+```
+New backend is missing implementation for PTX intrinsic optix.ptx.copysign.f32
+jit_optix_compile(): optixModuleGetCompilationState() indicates that the compilation
+did not complete successfully. State: 0x2363
+```
+
+**Cause.** drjit 1.5.0 emits a `copysign.f32` PTX instruction. OptiX's module compiler
+translates it to `optix.ptx.copysign.f32`, and support for lowering that intrinsic
+**landed in NVIDIA driver 572.46**. Explorer is behind that floor on every GPU type:
+
+| GPU | driver |
+|---|---|
+| H200 | 570.86.15 |
+| A100-SXM4-80GB | 570.86.15 |
+| T4 | 570.86.15 |
+| V100-PCIE | 545.23.08 |
+
+So the driver is **too old**, not too new. This resolves itself if Explorer updates to
+≥ 572.46, at which point the patch below becomes unnecessary (but harmless).
+
+**Fix.** `patches/drjit-core-copysign-optix.patch` replaces the instruction with
+equivalent bit manipulation — mask the magnitude, mask the sign, OR them. It is
+**bit-exact**, not an approximation: identical results including NaN payloads, since
+`copysign` is pure bit shuffling either way. The 7.2 GB static library and 2.2 GB
+trajectory library were produced with it and are numerically sound.
+
+```bash
+cd /projects/ipl_lab/$USER
+git clone --depth 1 --branch v1.5.0 --recurse-submodules     https://github.com/mitsuba-renderer/drjit.git drjit-src
+cd drjit-src/ext/drjit-core
+git apply /projects/ipl_lab/$USER/sionna-rt-jamming/patches/drjit-core-copysign-optix.patch
+cd /projects/ipl_lab/$USER/drjit-src
+
+module load cmake/3.30.2 cuda/12.8.0
+source /projects/ipl_lab/$USER/sionna-rt-jamming/.venv/bin/activate
+pip wheel . -w /tmp/drjit-wheel --no-deps
+pip install --force-reinstall /tmp/drjit-wheel/drjit-1.5.0-cp311-cp311-linux_x86_64.whl
+```
+
+Verify on a GPU node — it must report `cuda_ad_mono_polarized`, not the LLVM fallback:
+
+```bash
+srun --partition=gpu --gres=gpu:a100:1 --mem=8G --time=00:10:00      ./scripts/smoke_test.sh
+```
+
+**Do not "fix" this by changing package versions.** sionna-rt 2.1.0 hard-pins
+`drjit==1.5.0` and `mitsuba==3.9.1`, so downgrading either breaks the install.
+
+<details>
+<summary>Four approaches that do not work (so nobody repeats them)</summary>
+
+| Attempt | Why it fails |
+|---|---|
+| Downgrade to mitsuba 3.6 / drjit 1.0.1 | sionna-rt 2.1.0 hard-pins drjit 1.5.0 and mitsuba 3.9.1; pip resolves back or the install breaks |
+| `dr.set_flag(dr.JitFlag.ShaderExecutionReordering, False)` | The intrinsic is not SER-specific. Tested: still aborts. |
+| `LD_PRELOAD` shim to rewrite the PTX | drjit `dlopen`s OptiX and resolves symbols via `dlsym`, so `LD_PRELOAD` interposition never sees the call — `RTLD_NEXT` returns NULL and the shim segfaults (exit 139) |
+| Run on V100 (driver 545, pre-new-backend) | Does not abort, but OptiX compilation never finished inside an hour for this scene. Not viable for 20 000 positions. |
+
+CPU/LLVM fallback works and is numerically correct, but measured 22 s per position —
+about 120 h for the static library alone.
+
+</details>
+
 ### Submitting on the cluster
 
 `./submit.sh` picks the SLURM settings for whichever cluster you are on. Two profiles live

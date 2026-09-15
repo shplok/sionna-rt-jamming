@@ -1,0 +1,42 @@
+diff --git a/src/cuda_eval.cpp b/src/cuda_eval.cpp
+index 7e1e5e0..5b9181e 100644
+--- a/src/cuda_eval.cpp
++++ b/src/cuda_eval.cpp
+@@ -797,16 +797,34 @@ static void jitc_cuda_render(Variable *v) {
+         }
+ 
+         case VarKind::Copysign:
+-            // PTX only provides 'copysign' for single/double precision. Note
+-            // that its operands are reversed with respect to the C convention.
++            // PTX has a 'copysign' instruction, but OptiX 8.x's new backend
++            // (driver 570+) fails to lower optix.ptx.copysign.f32 and aborts.
++            // Use bit manipulation for all float types instead.
++            // Note: operands are reversed vs C convention (a0=magnitude, a1=sign).
+             if (jitc_is_half(v))
+                 fmt("    .reg.$b $v_m, $v_s;\n"
+                     "    and.$b $v_m, $v, 0x7fff;\n"
+                     "    and.$b $v_s, $v, 0x8000;\n"
+                     "    or.$b $v, $v_m, $v_s;\n",
+                     v, v, v, v, v, a0, v, v, a1, v, v, v, v);
++            else if (jitc_is_single(v))
++                fmt("    .reg.$b $v_m, $v_s;\n"
++                    "    mov.$b $v_m, $v;\n"
++                    "    and.$b $v_m, $v_m, 0x7fffffff;\n"
++                    "    mov.$b $v_s, $v;\n"
++                    "    and.$b $v_s, $v_s, 0x80000000;\n"
++                    "    or.$b $v_s, $v_m, $v_s;\n"
++                    "    mov.$t $v, $v_s;\n",
++                    v, v, v, v, v, a0, v, v, v, v, v, a1, v, v, v, v, v, v, v, v, v, v);
+             else
+-                fmt("    copysign.$t $v, $v, $v;\n", v, v, a1, a0);
++                fmt("    .reg.$b $v_m, $v_s;\n"
++                    "    mov.$b $v_m, $v;\n"
++                    "    and.$b $v_m, $v_m, 0x7fffffffffffffff;\n"
++                    "    mov.$b $v_s, $v;\n"
++                    "    and.$b $v_s, $v_s, 0x8000000000000000;\n"
++                    "    or.$b $v_s, $v_m, $v_s;\n"
++                    "    mov.$t $v, $v_s;\n",
++                    v, v, v, v, v, a0, v, v, v, v, v, a1, v, v, v, v, v, v, v, v, v, v);
+             break;
+ 
+         case VarKind::Ceil:
