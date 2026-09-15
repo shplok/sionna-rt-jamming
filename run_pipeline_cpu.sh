@@ -43,7 +43,20 @@ PRECISION="float16"
 set -e
 mkdir -p logs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[ -f "${SCRIPT_DIR}/server_env.sh" ] && source "${SCRIPT_DIR}/server_env.sh"
+# sbatch copies this script to /var/spool/slurmd/job*/slurm_script, so BASH_SOURCE[0]
+# points at the spool copy, not the repo. Fall back to SLURM_SUBMIT_DIR, which sbatch
+# sets to the directory the job was submitted from. Previously this silently failed to
+# source server_env.sh, leaving sionna_activate_env undefined and the job dead in 2 s.
+_ENV="${SCRIPT_DIR}/server_env.sh"
+[ -f "$_ENV" ] || _ENV="${SLURM_SUBMIT_DIR:-.}/server_env.sh"
+if [ -f "$_ENV" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$_ENV")" && pwd)"
+    source "$_ENV"
+else
+    echo "ERROR: server_env.sh not found (tried $SCRIPT_DIR and ${SLURM_SUBMIT_DIR:-.})" >&2
+    exit 1
+fi
+cd "$SCRIPT_DIR"
 # after server_env.sh, so SIONNA_DATASET_ROOT is known
 DATASET_DIR="${DATASET_DIR:-${SIONNA_DATASET_ROOT:-./datasets}/batch_simulation_nyc}"
 sionna_activate_env || exit 1
