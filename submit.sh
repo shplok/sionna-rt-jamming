@@ -180,39 +180,21 @@ PYCHK
     ;;
 
   smoke)
-    # 20 positions is enough to prove simulate_static works end to end: it exercises
-    # scene loading, the solver call, the memmap write and the progress checkpoint.
-    DS="./datasets/batch_simulation_smoke"
+    # Being inside an allocation is not enough -- a CPU allocation has no GPU, so
+    # running here would fail. Only run in place if a GPU is actually visible.
+    if [ -n "$IN_ALLOC" ] && nvidia-smi -L >/dev/null 2>&1; then
+        echo "[submit] GPU visible in job $SLURM_JOB_ID -- running the smoke test here"
+        exec ./scripts/smoke_test.sh
+    fi
     if [ -n "$IN_ALLOC" ]; then
-        echo "[submit] already inside job $SLURM_JOB_ID -- running the smoke test here"
-        RUNNER=(bash -c)
+        echo "[submit] inside job $SLURM_JOB_ID but no GPU here -- dispatching via srun"
     else
         echo "[submit] smoke test via srun on $SIONNA_GPU_PARTITION / $SIONNA_GPU_GRES"
-        RUNNER=(srun --partition="$SIONNA_GPU_PARTITION" --gres="$SIONNA_GPU_GRES"
-                --nodes=1 --ntasks=1 --mem="$SIONNA_GPU_MEM" --time=00:30:00 $(_acct)
-                bash -c)
     fi
-    "${RUNNER[@]}" "
-            source ~/.bashrc
-            conda activate ${CONDA_ENV_NAME:-sionna} 2>/dev/null || export PATH=\"$CONDA_BIN_DIR:\$PATH\"
-            export MITSUBA_VARIANT=$MITSUBA_VARIANT
-            set -e
-            python main_batch_cluster.py --action generate_static --dataset-dir $DS \
-                --n-static 20 --map-bounds-b 1500 --cell-size 10 10
-            python main_batch_cluster.py --action simulate_static --dataset-dir $DS \
-                --map-bounds-b 1500 --cell-size 10 10 --samples-per-tx 10000000 --max-depth 80
-            python - <<'PY'
-import numpy as np
-a = np.load('$DS/single_static_jammers/watts.npy', mmap_mode='r')
-print('shape', a.shape, a.dtype)
-m = float(np.asarray(a[0]).max())
-print('max watts in map 0:', m)
-assert a.shape == (20, 300, 300), a.shape
-assert m > 0, 'map is empty - the solver returned nothing'
-print('SMOKE TEST PASSED')
-PY
-         "
-    echo "[submit] remove the scratch dataset with:  rm -rf $DS"
+    # strip this job's SLURM_* so the step is not constrained by a CPU allocation
+    _clean srun --partition="$SIONNA_GPU_PARTITION" --gres="$SIONNA_GPU_GRES" \
+           --nodes=1 --ntasks=1 --mem="$SIONNA_GPU_MEM" --time=00:30:00 $(_acct) \
+           ./scripts/smoke_test.sh
     ;;
 
   *)
