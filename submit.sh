@@ -76,12 +76,6 @@ case "$ACTION" in
     echo; echo "--- GPU visible here? ---"
     nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null \
         || echo "  no GPU in this shell (fine if you are on a login node)"
-    echo; echo "--- python env ---"
-    python -c "import numpy, trimesh; print('  numpy', numpy.__version__, '| trimesh', trimesh.__version__)" 2>&1 | tail -1
-    python -c "
-import mitsuba as mi
-mi.set_variant('$MITSUBA_VARIANT'); print('  mitsuba variant:', mi.variant())
-import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
     echo; echo "--- input data ---"
     for d in ./data/NYC3KM_585751_4512036/simple_OSM_scene.xml ./data/NYC3KM_585751_4512036/mesh; do
         [ -e "$d" ] && echo "  OK   $d" || echo "  BAD  missing $d"
@@ -101,12 +95,41 @@ import sionna.rt; print('  sionna.rt OK')" 2>&1 | tail -2
         echo "  BAD  no venv at $SIONNA_VENV -- create it with:"
         echo "       <py311>/bin/python3.11 -m venv $SIONNA_VENV"
     fi
-    ( sionna_activate_env >/dev/null 2>&1 && echo "  OK   activated -> $(command -v python) ($(python -V 2>&1))" ) \
-        || echo "  BAD  could not activate any environment"
+    if sionna_activate_env >/dev/null 2>&1; then
+        echo "  OK   activated -> $(command -v python) ($(python -V 2>&1))"
+        # these must run AFTER activation, or they report ModuleNotFoundError for a
+        # perfectly good venv
+        python -c "import numpy, scipy, trimesh, matplotlib; print('  OK   core: numpy', numpy.__version__)" \
+            2>&1 | tail -1
+        python - <<'PYCHK' 2>&1 | tail -3
+import os, sys
+try:
+    import mitsuba as mi, drjit
+    print("  OK   mitsuba", mi.__version__, "| drjit", drjit.__version__)
+except Exception as e:
+    print("  BAD  mitsuba/drjit:", e); sys.exit(0)
+try:
+    import sionna.rt
+    print("  OK   sionna.rt imports")
+except Exception as e:
+    print("  BAD  sionna.rt:", str(e)[:200])
+    if "libLLVM" in str(e):
+        print("       -> DRJIT_LIBLLVM_PATH is unset or wrong. server_env.sh globs for it;")
+        print("          check with: ls /usr/lib64/libLLVM.so*")
+PYCHK
+    else
+        echo "  BAD  could not activate any environment"
+    fi
+    echo "  DRJIT_LIBLLVM_PATH=${DRJIT_LIBLLVM_PATH:-<unset>}"
 
     echo; echo "--- home quota (conda and pip fail obscurely when this is full) ---"
-    q="$( { quota -s 2>/dev/null || lfs quota -h -u "$USER" "$HOME" 2>/dev/null; } | tail -3 )"
-    [ -n "$q" ] && echo "$q" | sed 's/^/       /' || echo "       (quota command unavailable)"
+    if command -v check-quota >/dev/null 2>&1; then
+        check-quota "$HOME" 2>&1 | sed 's/^/       /' | head -8
+        echo "       (check-quota only answers from a compute node, not a login node)"
+    else
+        { quota -s 2>/dev/null || lfs quota -h -u "$USER" "$HOME" 2>/dev/null; } \
+            | tail -3 | sed 's/^/       /' || echo "       (no quota tool found)"
+    fi
     hu=$(du -sh "$HOME" 2>/dev/null | cut -f1); echo "  \$HOME usage: ${hu:-?}"
     if ! ( : > "$HOME/.sionna_write_test" ) 2>/dev/null; then
         echo "  BAD  \$HOME is NOT writable -- quota is full. conda/pip will fail with"
