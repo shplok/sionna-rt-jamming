@@ -103,6 +103,13 @@ detections it feeds to the tracker are **out-of-sample by construction**.
 | `run_pipeline_gpu.sh` | cluster | **yes** | `generate`, `simulate_bases`, `generate_static`, `simulate_static` |
 | `run_pipeline_cpu.sh` | cluster | no | splits, labels, `aggregate`, `aggregate_static`, validation |
 
+The stages come in pairs: **`generate` decides *where* the jammers are, `simulate_bases`
+computes *what the radio field looks like* there.** `generate` is pure geometry — it lays out
+the 54 trajectories and writes `traj_*.npy`, no radio involved, CPU-seconds.
+`simulate_bases` then ray traces one radio map per frame of those trajectories, which is the
+expensive GPU part. `generate_static` / `simulate_static` are the same division of labour for
+the static positions.
+
 Submitting them as two jobs matters: ray tracing takes ~1.5 h, the CPU work takes longer, and
 holding a GPU reservation through the CPU half would waste it.
 
@@ -544,6 +551,12 @@ python main_batch_cluster.py --action aggregate_static --dataset-dir $DS \
 python scripts/validate_dataset.py --dataset-dir $DS
 ```
 
+**`--max-depth 80`** is the ray-tracing bounce limit: how many times a ray may reflect off
+buildings before it is dropped. Low values only capture near line-of-sight paths; 80 lets
+energy bounce deep into shadowed side streets and urban canyons, which is the multipath that
+makes this data worth ray tracing rather than modelling with a path-loss formula. It costs
+little here because runtime is dominated by `--samples-per-tx`.
+
 **Ordering:** `make_splits.py` reads `single_static_jammers/positions.npy`, so it must run *after* `generate_static`. Missing file → detection branch silently skipped with a warning.
 
 ### Watch out for
@@ -566,6 +579,12 @@ python scripts/validate_dataset.py --dataset-dir $DS
 | `{split}/labels.npz` | per (sample, jammer): `x, y` in metres, plus `col, row, dx, dy` |
 | `{split}/meta.npz` | `num_jammers`, `position_ids`, `sensor_density_pct`, `num_sensors`, `sensor_seed`, `noise_seed` |
 | `splits.json` | `sensor_cells` (street cells) and the per-sample specs |
+
+**`noise_seed`** is the seed for that sample's measurement-noise draw. The ray tracer is
+deterministic, so the stored map is the same every time; the σ = 1 dB Gaussian added on top
+(`--meas-noise-var 1.0`, in dB) is not. Recording the seed per sample means any sample's exact
+noise realisation can be reproduced, and that two front ends can be handed byte-identical
+measurements. `sensor_seed` plays the same role for which cells become sensors.
 
 Preprocessing, all cheap and all pure functions of the above:
 
