@@ -34,9 +34,7 @@ datasets/batch_simulation_nyc/          <- --dataset-dir
 
 **Why the detector gets its own library.** DeepMTL is a single-snapshot model — motion is irrelevant. Sampling from trajectories would confine every training jammer to 54 corridors with adjacent frames correlated at r = 0.884. Independent static positions cost the same 0.235 s of GPU each and scatter over the whole street network. It also removes a methodological trap: the detector never sees a trajectory frame, so detections fed to the tracker are **out-of-sample by construction**.
 
-> **⚠️ Neither base library has been ray traced yet at 10 m.** The stale 8 m maps were
-> deleted; only the 54 `traj_*.npy` files survive (they are grid-independent). Run
-> `run_pipeline_gpu.sh` first — ~1.5 h for both libraries.
+> **Dataset fully generated.** GPU job 10357699 (2026-09-15, ~1.9 h) produced all 54 trajectory maps and 20 000 static maps. CPU job 10361058 (2026-09-15) produced all scenarios, samples, splits, and labels — 13/13 validation checks passed.
 
 ---
 
@@ -306,7 +304,7 @@ Gaussian blobs at TX locations) then **YOLOv3-cust** (blobs → coordinates).
 | TX power | random, 0–5 dBm | fixed, 40 dBm |
 | Propagation | log-distance + Gaussian shadowing, or SPLAT! | Sionna RT (ray traced) |
 | Transmitters move | no | **yes, trajectories** |
-| Dataset size | 100 000 train / 20 000 test | 40 000 / 5 000 / 5 000 |
+| Dataset size | 100 000 train / 20 000 test | 70 000 / 15 000 / 15 000 (detector) |
 
 ### Dense on disk, sparse at training time
 

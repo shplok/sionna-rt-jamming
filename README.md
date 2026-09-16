@@ -9,7 +9,7 @@ Two entry points, for two different machines:
 | | Entry point | Where | What it is for |
 |---|---|---|---|
 | **Interactive** | `main_interactive_local.py` | **your laptop** | Design jammer paths in a GUI, simulate a handful of jammers. Exploration and figures. |
-| **Batch** | `main_batch_cluster.py` | **GPU cluster only** | Generate the full dataset headless, via `sbatch run_pipeline.sh`. |
+| **Batch** | `main_batch_cluster.py` | **GPU cluster only** | Generate the full dataset headless, via `./submit.sh gpu` then `./submit.sh cpu`. |
 
 **The batch pipeline is cluster-only by design.** Ray tracing the base maps needs a CUDA
 GPU, and the finished dataset is ~96 GB — neither fits on a laptop. Only the interactive
@@ -24,8 +24,8 @@ decisions, file formats, labels, noise model. **Read that one before generating 
 | | `requirements_local.txt` | `requirements_cluster.txt` |
 |---|---|---|
 | Machine | laptop, CPU only | Linux + NVIDIA GPU |
-| Runs | `main_interactive_local.py` | `main_batch_cluster.py`, `run_pipeline.sh` |
-| Contents | the six packages the repo imports | full `pip freeze` of the working env |
+| Runs | `main_interactive_local.py` | `main_batch_cluster.py`, `run_pipeline_gpu.sh`, `run_pipeline_cpu.sh` |
+| Contents | the seven packages the repo imports | full `pip freeze` of the working env |
 | Mitsuba variant | `llvm_ad_mono_polarized` | `cuda_ad_mono_polarized` |
 | Why not the other | — | pins `torch==2.6.0+cu124` and `nvidia-*` wheels, `linux_x86_64` only |
 
@@ -182,7 +182,7 @@ The whole dataset is built here. Two SLURM jobs: ray tracing (GPU), then everyth
 
 ### ⚠️ Northeastern Explorer: the home quota will bite you
 
-Explorer gives each user a small quota on `/home` (separate from the lab's 35 TB on `/projects`). A single miniconda install is ~43 GB. When it fills, failures are **misleading**:
+Explorer gives each user a small quota on `/home` (separate from the lab's 35 TB on `/projects`). A single miniconda install is ~4.3 GB. When it fills, failures are **misleading**:
 
 | What you see | What it actually is |
 |---|---|
@@ -315,14 +315,14 @@ Config is in the `SIONNA_*` namespace (not `SLURM_*` — inside an allocation th
 **Step 2 — environment (once).**
 
 ```bash
-source ~/miniconda3/etc/profile.d/conda.sh
+source /projects/ipl_lab/$USER/miniconda3/etc/profile.d/conda.sh
 conda create -n sionna python=3.11 && conda activate sionna
 pip install --upgrade pip setuptools wheel
 pip install -r requirements_cluster.txt
 python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print(mi.variant())"
 ```
 
-`conda activate` requires the shell hook to be sourced first — not guaranteed in batch jobs. Pipeline scripts call `sionna_activate_conda` from `server_env.sh`, which sources `$CONDA_SH`, falls back to `conda` on `PATH`, then `$CONDA_BIN_DIR`, and fails loudly rather than silently using the wrong Python.
+`conda activate` requires the shell hook to be sourced first — not guaranteed in batch jobs. Pipeline scripts call `sionna_activate_env` (aliased as `sionna_activate_conda` for backwards compatibility) from `server_env.sh`, which tries the venv first, falls back to conda, and fails loudly rather than silently using the wrong Python.
 
 **⚠️ Where the dataset lands.** The run writes **~96 GB**, which will blow a typical home
 quota. The `explorer` profile therefore points `SIONNA_DATASET_ROOT` at
@@ -346,7 +346,7 @@ Expect `shape (20, 300, 300) float32`, positive max, `SMOKE TEST PASSED`. Then `
 tail -f logs/gpu_<jobid>.out
 ```
 
-**Step 5 — CPU job**, only after step 4 finishes. No GPU; writes ~87 GB.
+**Step 5 — CPU job**, only after step 4 finishes. No GPU; writes ~64 GB.
 
 ```bash
 ./submit.sh cpu

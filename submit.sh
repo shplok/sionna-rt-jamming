@@ -145,11 +145,11 @@ PYCHK
         [ -z "$avail" ] && avail=$(df -g "$SIONNA_DATASET_ROOT" 2>/dev/null | tail -1 | awk '{print $4}')
         echo "  OK   writable, ${avail:-?} GB free  (the run needs ~80 GB)"
         if [ -n "$avail" ] && [ "$avail" -lt 100 ] 2>/dev/null; then
-            echo "  WARN under 100 GB free -- the dataset is ~73 GB plus slack"
+            echo "  WARN under 100 GB free -- the dataset is ~96 GB plus slack"
         fi
         case "$SIONNA_DATASET_ROOT" in
           "$HOME"*|./*) echo "  WARN this looks like home or the repo. Home quotas are usually"
-                        echo "       far smaller than 73 GB -- point SIONNA_DATASET_ROOT at"
+                        echo "       far smaller than 96 GB -- point SIONNA_DATASET_ROOT at"
                         echo "       project storage instead." ;;
         esac
     else
