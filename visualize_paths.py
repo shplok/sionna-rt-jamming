@@ -18,8 +18,8 @@ from tkinter import ttk
 
 from utils.scene_objects import gather_bboxes
 
-# Defaults aligned with main.py
-DEFAULT_RESULTS_FOLDER = "./datasets/NYC_3jammer"
+# Defaults aligned with main_interactive_local.py
+DEFAULT_RESULTS_FOLDER = "./datasets/batch_simulation_nyc/single_trajectory_jammers"
 DEFAULT_MESHES_PATH = "./data/NYC3KM_585751_4512036/mesh"
 
 COLORS = {

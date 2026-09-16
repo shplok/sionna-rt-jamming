@@ -287,7 +287,7 @@ def run_simulation(engine, scene, map_center, map_size, cell_size, output_dir, b
     gif_path = os.path.join(output_dir, "jammer_animation.gif")
     create_jammer_animation(
         rss_list=aggregated_rss_history,
-        engine=engine,
+        paths_dict=engine.get_all_paths(),
         buildings=buildings,
         map_size=map_size,
         map_center=map_center,

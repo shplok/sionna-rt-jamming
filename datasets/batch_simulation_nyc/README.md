@@ -479,7 +479,7 @@ every shape, dtype and index path is real):
 
 **Deferred, flagged in place.**
 
-- [ ] `visualize_aggregated.py` — defaults point at removed paths (warning in its header)
+- [x] `visualize_aggregated.py` — deleted; replaced by `scripts/preview_dataset.py`
 - [ ] `main_interactive_local.py` — `b = 750`, `cell_size = (8, 8)`, so its output is **not**
       comparable with this dataset (TODO at the top of its `main()`)
 

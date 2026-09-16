@@ -11,6 +11,11 @@ Two entry points, for two different machines:
 | **Interactive** | `main_interactive_local.py` | **your laptop** | Design jammer paths in a GUI, simulate a handful of jammers. Exploration and figures. |
 | **Batch** | `main_batch_cluster.py` | **GPU cluster only** | Generate the full dataset headless, via `./submit.sh gpu` then `./submit.sh cpu`. |
 
+*Headless* means no screen and nobody clicking: a compute node has no display, so anything
+that runs there must write files instead of opening windows. In matplotlib terms that is the
+`Agg` backend; GUI backends like `TkAgg` fail on a node with
+`TclError: no display name and no $DISPLAY environment variable`.
+
 **The batch pipeline is cluster-only by design.** Ray tracing the base maps — the
 single-jammer maps every K-jammer scene is summed from — wants a CUDA GPU, and the finished
 dataset is ~96 GB. Neither fits on a laptop. Only the interactive entry point is meant to run
@@ -124,10 +129,10 @@ holding a GPU reservation through the CPU half would waste it.
 | `core/trajectory_generator.py` | Headless straight-corridor trajectory generation |
 | `ui/` | Tkinter menus and planners |
 | `utils/scene_objects.py` | Antenna arrays, mesh bbox extraction (cached) |
-| `utils/plotter.py` | RSS animation GIF |
+| `utils/plotter.py` | Plotting library — RSS animation GIF, single panels, contact sheets |
 | `utils/jammer_config.py` | Persists edited initial positions back to `main_interactive_local.py` |
-| `visualize_paths.py` | Viewer for saved path `.npy` files |
-| `visualize_aggregated.py` | Viewer for RSS cubes — **stale**, defaults point at removed paths |
+| `visualize_paths.py` | Tk GUI browser for saved path `.npy` files — **laptop only** |
+| `scripts/preview_dataset.py` | Headless contact sheets of the generated dataset, one panel per K |
 | `data/<scene>/` | `simple_OSM_scene.xml` + `mesh/*.ply` |
 | `datasets/` | Generated outputs (**gitignored**) |
 
@@ -197,6 +202,73 @@ Optional viewer:
 ```bash
 python visualize_paths.py --folder ./datasets/<NAME> --meshes ./data/NYC3KM_585751_4512036/mesh
 ```
+
+---
+
+## Plotting
+
+Three pieces, split by *what kind of thing they are* rather than by which branch they serve.
+
+| | What it is | Backend | Runs where |
+|---|---|---|---|
+| `utils/plotter.py` | library of plotting functions — take arrays, write figures | — | anywhere |
+| `scripts/preview_dataset.py` | CLI that knows the dataset layout | `Agg` | **cluster or laptop** |
+| `visualize_paths.py` | Tk GUI application | `TkAgg` | **laptop only** |
+
+`utils/plotter.py` holds the drawing and nothing else — no CLI, no knowledge of where files
+live:
+
+| Function | Draws |
+|---|---|
+| `create_jammer_animation(rss_list, paths_dict, ...)` | RSS cube → animated GIF. Used by the interactive run and by `--gif` below |
+| `plot_rss_panel(ax, rss, extent, ...)` | one RSS frame into an existing axis |
+| `plot_rss_sheet(panels, extent, ...)` | grid of panels → one PNG, shared colour scale |
+| `draw_buildings(ax, buildings)` | grey building overlay, shared by all of the above |
+
+### Previewing the generated dataset
+
+`scripts/preview_dataset.py` writes contact sheets with **one panel per jammer count
+K = 0…10**, in the same style as the interactive GIF: viridis RSS, grey buildings, white
+ground-truth markers, one shared colour scale per sheet so brightness is comparable across
+panels.
+
+```bash
+# both branches, K = 0..10, from the val split
+python scripts/preview_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
+
+# detector samples only
+python scripts/preview_dataset.py --branch static
+
+# tracking scenarios, plus one GIF per previewed scenario
+python scripts/preview_dataset.py --branch trajectory --gif
+```
+
+Writes to `<dataset-dir>/previews/` (inside `datasets/`, so gitignored):
+
+```
+previews/
+  static_val_by_k.png        11 detector samples,   K = 0..10
+  trajectory_val_by_k.png    11 tracking scenarios, K = 0..10
+  <scenario_id>.gif          only with --gif
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--branch` | `both` | `static` \| `trajectory` \| `both` |
+| `--split` | `val` | `val` is the fast choice; `train` works the same way |
+| `--max-k` | `10` | previews `K = 0..max-k`, so 11 panels by default |
+| `--frame-frac` | `0.5` | which frame of each scenario to show, as a fraction of its duration |
+| `--mesh-dir` | NYC meshes | pass `--mesh-dir ''` to skip the building overlay — at 3 km the 7 552 footprints are visually heavy |
+| `--gif` | off | **~20–27 MB per scenario**, so ~250 MB for all 11. Sheets only, unless you need the motion |
+| `--vmin` / `--vmax` | `-145` / `0` | dBW colour limits |
+
+Picking by K is cheap in both branches: static samples carry `num_jammers` in `meta.npz`, and
+trajectory scenarios encode it in the directory name (`val_00007_k03`).
+
+**Sanity check it doubles as.** A correct sheet has exactly K markers per panel, every marker
+sitting on a bright spot, and a uniformly dark K=0 panel (noise floor only). If markers land
+off the peaks, the row/col → x/y convention has been broken somewhere: `rss[row, col]` with
+`x = -1500 + (col + frac) · 10` and `y` likewise from `row`, drawn with `origin='lower'`.
 
 The first run reads ~7.5 k building meshes; `gather_bboxes` caches the result to a `.pkl` in
 the mesh directory, so later runs are instant.
