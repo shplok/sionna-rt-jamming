@@ -11,9 +11,16 @@ Two entry points, for two different machines:
 | **Interactive** | `main_interactive_local.py` | **your laptop** | Design jammer paths in a GUI, simulate a handful of jammers. Exploration and figures. |
 | **Batch** | `main_batch_cluster.py` | **GPU cluster only** | Generate the full dataset headless, via `./submit.sh gpu` then `./submit.sh cpu`. |
 
-**The batch pipeline is cluster-only by design.** Ray tracing the base maps needs a CUDA
-GPU, and the finished dataset is ~96 GB — neither fits on a laptop. Only the interactive
-entry point is meant to run locally.
+**The batch pipeline is cluster-only by design.** Ray tracing the base maps — the
+single-jammer maps every K-jammer scene is summed from — wants a CUDA GPU, and the finished
+dataset is ~96 GB. Neither fits on a laptop. Only the interactive entry point is meant to run
+locally.
+
+(*To be precise: CUDA is a throughput requirement, not a functional one. Both entry points try
+`cuda_ad_mono_polarized` and fall back to `llvm_ad_mono_polarized`, which is numerically
+correct — just ~94× slower, 22 s per trace versus 0.235 s. Batch needs 23 240 traces: ~1.5 h
+on an A100, ~140 h on CPU. Interactive needs a handful at the same cost each, so CPU is the
+intended local path, not a downgrade.*)
 
 The dataset itself is documented separately, in
 [`datasets/batch_simulation_nyc/README.md`](datasets/batch_simulation_nyc/README.md) — design
@@ -27,10 +34,23 @@ decisions, file formats, labels, noise model. **Read that one before generating 
 | Runs | `main_interactive_local.py` | `main_batch_cluster.py`, `run_pipeline_gpu.sh`, `run_pipeline_cpu.sh` |
 | Contents | the seven packages the repo imports | full `pip freeze` of the working env |
 | Mitsuba variant | `llvm_ad_mono_polarized` | `cuda_ad_mono_polarized` |
-| Why not the other | — | pins `torch==2.6.0+cu124` and `nvidia-*` wheels, `linux_x86_64` only |
 
-Both lists include `trimesh`, `numpy`, `scipy`, `matplotlib`, `mitsuba` and `sionna-rt`;
-they install fine on macOS. The split exists purely because of the CUDA pins.
+Both lists include `trimesh`, `numpy`, `scipy`, `matplotlib`, `mitsuba`, `drjit` and
+`sionna-rt` at identical versions.
+
+**Why two files.** `requirements_cluster.txt` is a raw `pip freeze` — 111 lines of everything
+installed in the working env, including `torch`, `torchvision` and 13 `nvidia-*` CUDA wheels.
+`requirements_local.txt` is hand-written: only the seven packages the repo imports.
+
+**The difference is one-directional.** The cluster file will *not* install on a laptop — its
+CUDA wheels are published for Linux + NVIDIA only. The local file installs and runs fine on
+the cluster, since mitsuba's Linux package already contains the GPU version. So: local is the
+portable one, cluster is the exactly-reproducible one.
+
+**Two caveats.** The packages that block the cluster file are ones the repo never uses —
+there is no `import torch` anywhere; they are there only because `pip freeze` captures the
+whole env. And neither file suffices on Explorer: both pin stock `drjit==1.5.0`, which
+crashes on its GPUs and needs the patched build described below.
 
 ---
 
@@ -53,6 +73,15 @@ detector is a **single-snapshot** model — motion is irrelevant to it, and samp
 from trajectories would confine every training jammer to 54 straight corridors with adjacent
 frames correlated at r = 0.884. Independent static positions cost the same GPU time and
 scatter over the whole street network.
+
+(*`r = 0.884` is the Pearson correlation between the flattened dBW map at frame `t` and frame
+`t+1`, averaged over all 3 186 adjacent pairs — i.e. the next frame is ~88 % linearly
+predictable from the current one, so two adjacent frames are nowhere near two independent
+training samples. Note it is unit-dependent: the same data in linear watts gives r = 0.19,
+because ~94 % of the dBW map sits flat at the noise floor and those identical dead cells
+dominate the correlation, whereas in watts the floor is ≈ 0 and only the moving peak counts.
+The unit-free version of the argument is displacement: at 1 fps the jammer advances 0.3, 0.9
+and 1.5 cells per frame at 3, 9 and 15 m/s — at 3 m/s it does not even leave its own cell.*)
 
 It also keeps the two models honest: the detector never sees a trajectory frame, so the
 detections it feeds to the tracker are **out-of-sample by construction**.
@@ -85,7 +114,6 @@ holding a GPU reservation through the CPU half would waste it.
 | `submit.sh` | Site-aware wrapper: `./submit.sh {show,verify,smoke,gpu,cpu}` |
 | `run_pipeline_gpu.sh` | SLURM job — **ray tracing only**, needs a GPU |
 | `run_pipeline_cpu.sh` | SLURM job — everything after, **no GPU**, 64 GB RAM |
-| `run_pipeline.sh` | Luis's original single-job script (`eff898c4`), kept for reference |
 | `server_env.sh` | Per-site SLURM + conda profiles (`explorer`, `pomplun`) |
 | `scripts/make_splits.py` | Trajectory pools, scenarios, static position splits, sensors → `splits.json` |
 | `scripts/validate_dataset.py` | Post-generation checks; non-zero exit on failure |
