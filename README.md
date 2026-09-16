@@ -235,6 +235,7 @@ live:
 | `create_jammer_animation(rss_list, paths_dict, ...)` | RSS cube → animated GIF. Used by the interactive run and by `--gif` below |
 | `plot_rss_panel(ax, rss, extent, ...)` | one RSS frame into an existing axis |
 | `plot_rss_sheet(panels, extent, ...)` | grid of panels → one PNG, shared colour scale |
+| `plot_rss_3d(rss, sensor_idx, street_mask, grid, ...)` | 3D view: street plan on the floor, sensor readings above it |
 | `draw_buildings(ax, buildings)` | grey building overlay, shared by all of the above |
 
 ### Previewing the generated dataset
@@ -259,10 +260,31 @@ Writes to `<dataset-dir>/previews/` (inside `datasets/`, so gitignored):
 
 ```
 previews/
-  static_val_by_k.png        11 detector samples,   K = 0..10
-  trajectory_val_by_k.png    11 tracking scenarios, K = 0..10
-  <scenario_id>.gif          only with --gif
+  static_val_by_k.png          11 detector samples,   K = 0..10
+  trajectory_val_by_k.png      11 tracking scenarios, K = 0..10
+  static_val_k00_3d.png ..     one 3D PNG per K, with --3d
+  trajectory_val_k00_3d.png ..
+  <scenario_id>.gif            only with --gif
 ```
+
+### The 3D view
+
+`--3d` writes **one PNG per K** rather than a sheet, because the interesting thing is the
+single scenario, not the comparison. Each shows the street plan flat on the floor, then the
+scenario's **sensor readings** as points at their RSS height, coloured on the same scale.
+Ground-truth jammers are red vertical stems.
+
+```bash
+python scripts/batch_cluster/preview_dataset.py --3d              # 3D only, 11 per branch
+python scripts/batch_cluster/preview_dataset.py --sheet --3d      # both
+python scripts/batch_cluster/preview_dataset.py --3d --elev 20 --azim -60
+```
+
+This is the view that shows what the detector actually receives: only sensor cells, not the
+dense field. Sensor density varies per sample (2–10 %), and the title records which. The two
+branches get their layouts differently — trajectory scenarios read theirs from
+`sensors/sensors_{split}.npz`, detector samples have theirs redrawn from `sensor_seed` (see
+the warning in the detector section below).
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -272,6 +294,8 @@ previews/
 | `--frame-frac` | `0.5` | which frame of each scenario to show, as a fraction of its duration |
 | `--mesh-dir` | NYC meshes | pass `--mesh-dir ''` to skip the building overlay — at 3 km the 7 552 footprints are visually heavy |
 | `--gif` | off | **~20–27 MB per scenario**, so ~250 MB for all 11. Sheets only, unless you need the motion |
+| `--3d` | off | one 3D PNG per K instead of a sheet; add `--sheet` for both |
+| `--elev` / `--azim` | `34` / `-120` | 3D camera angles |
 | `--vmin` / `--vmax` | `-145` / `0` | dBW colour limits |
 
 Picking by K is cheap in both branches: static samples carry `num_jammers` in `meta.npz`, and
@@ -593,9 +617,17 @@ measurements. `sensor_seed` plays the same role for which cells become sensors.
 
 Preprocessing, all cheap and all pure functions of the above:
 
-1. **Sensor masking** — take the sample's cells from `sensors/sensors_{split}.npz`, gather
-   `rss.npy` there, floor the rest. This is what turns our dense map into DeepMTL's sparse
-   observation matrix.
+1. **Sensor masking** — gather `rss.npy` at the sample's sensor cells, floor the rest. This is
+   what turns our dense map into DeepMTL's sparse observation matrix.
+
+   > **⚠️ `sensors/sensors_{split}.npz` covers the tracking scenarios only.** `make_splits.py`
+   > calls `build_sensor_layouts()` with the scenarios, not the static samples, so that file
+   > holds 500 val layouts, not 15 000. A detector sample stores `num_sensors` and
+   > `sensor_seed` in `meta.npz` and its layout is **redrawn on demand**:
+   > `draw_sensors(placeable, flat_mask, n_cells, num_sensors, sensor_seed, relocation_passes)`
+   > from `make_splits.py`, with `placeable = splits["sensor_cells"]`. The draw is seeded, so it
+   > reproduces exactly. See `static_sensor_cells()` in `scripts/batch_cluster/preview_dataset.py`
+   > for a working call — note `flat_mask` is `(n*n,)`, not `(n, n)`.
 2. **Normalisation** — subtract the noise floor `N`, divide by `−N/2`: empty cells 0, sensor
    cells in (0, 2].
 3. **Gaussian targets** — from the continuous `x, y`: amplitude 10, σ = 0.9, 5 × 5 support.

@@ -27,8 +27,43 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from utils.plotter import create_jammer_animation, plot_rss_sheet
+from utils.plotter import create_jammer_animation, plot_rss_3d, plot_rss_sheet
 from utils.scene_objects import gather_bboxes
+
+
+def load_splits(dataset_dir):
+    with open(os.path.join(dataset_dir, "splits.json")) as f:
+        return json.load(f)
+
+
+def street_mask_from_splits(splits):
+    """(n, n) bool, True where a cell is street. sensor_cells is the placeable list."""
+    n = int(splits["grid"]["n_cells"])
+    mask = np.zeros(n * n, dtype=bool)
+    mask[np.asarray(splits["sensor_cells"], dtype=np.int64)] = True
+    return mask.reshape(n, n)
+
+
+def static_sensor_cells(splits, sample_spec):
+    """
+    Reproduce a detector sample's sensor layout.
+
+    Only the tracking scenarios get their layouts written to sensors/*.npz;
+    static samples store num_sensors + sensor_seed and are redrawn on demand
+    (make_splits.py calls build_sensor_layouts with the scenarios only).
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from make_splits import draw_sensors
+
+    n = int(splits["grid"]["n_cells"])
+    placeable = np.asarray(splits["sensor_cells"], dtype=np.int64)
+    mask = np.zeros(n * n, dtype=bool)   # flat: _relocate_once ANDs it with occupied.ravel()
+    mask[placeable] = True
+    cells, _ = draw_sensors(placeable, mask, n,
+                            int(sample_spec["num_sensors"]),
+                            int(sample_spec["sensor_seed"]),
+                            int(splits.get("relocation_passes", 5)))
+    return cells
 
 
 def build_extent(b):
@@ -45,28 +80,44 @@ def load_buildings(mesh_dir):
         return []
 
 
-def static_panels(split_dir, ks):
-    """One detector sample per K, chosen as the first sample with that K."""
+def static_pick(split_dir, ks):
+    """(K, sample index) for the first detector sample at each K."""
     meta = np.load(os.path.join(split_dir, "meta.npz"))
-    labels = np.load(os.path.join(split_dir, "labels.npz"))
-    rss = np.load(os.path.join(split_dir, "rss.npy"), mmap_mode="r")
-
     num_jammers = meta["num_jammers"]
-    offsets = meta["position_offsets"]
-    density = meta["sensor_density_pct"]
 
-    panels = []
+    picked = []
     for k in ks:
         hits = np.where(num_jammers == k)[0]
         if len(hits) == 0:
             print(f"  K={k}: no sample in this split, skipped")
             continue
-        i = int(hits[0])
-        s, e = offsets[i], offsets[i + 1]
+        picked.append((k, int(hits[0])))
+    return picked
+
+
+def static_sample(split_dir, i):
+    """RSS frame, ground-truth xy and sensor metadata for one detector sample."""
+    meta = np.load(os.path.join(split_dir, "meta.npz"))
+    labels = np.load(os.path.join(split_dir, "labels.npz"))
+    rss = np.load(os.path.join(split_dir, "rss.npy"), mmap_mode="r")
+
+    s, e = meta["position_offsets"][i], meta["position_offsets"][i + 1]
+    return {
+        "rss": np.asarray(rss[i]).astype(np.float32),
+        "jammers": np.column_stack([labels["x"][s:e], labels["y"][s:e]]),
+        "density": float(meta["sensor_density_pct"][i]),
+        "num_sensors": int(meta["num_sensors"][i]),
+    }
+
+
+def static_panels(split_dir, picks):
+    panels = []
+    for k, i in picks:
+        d = static_sample(split_dir, i)
         panels.append({
-            "rss": np.asarray(rss[i]).astype(np.float32),
-            "jammers": np.column_stack([labels["x"][s:e], labels["y"][s:e]]),
-            "title": f"K={k}  sample {i}  ({density[i]:.0f}% sensors)",
+            "rss": d["rss"],
+            "jammers": d["jammers"],
+            "title": f"K={k}  sample {i}  ({d['density']:.0f}% sensors)",
         })
     return panels
 
@@ -97,6 +148,48 @@ def trajectory_panels(scenarios, frame_frac):
             "title": f"K={k}  {os.path.basename(d)}  frame {t}/{cube.shape[0] - 1}",
         })
     return panels
+
+
+def static_3d(split_dir, picks, splits, street, out_dir, split, vmin, vmax, elev, azim):
+    """One PNG per K: street plan on the floor, this sample's sensor readings above it."""
+    specs = splits["static"]["samples"][split]
+    for k, i in picks:
+        d = static_sample(split_dir, i)
+        cells = static_sensor_cells(splits, specs[i])
+        plot_rss_3d(
+            d["rss"], cells, street, splits["grid"], jammers=d["jammers"],
+            vmin=vmin, vmax=vmax, elev=elev, azim=azim,
+            title=(f"Detector sample {i} - K={k} jammers, "
+                   f"{d['density']:.0f}% sensor density ({len(cells)} sensors)"),
+            filename=os.path.join(out_dir, f"static_{split}_k{k:02d}_3d.png"),
+        )
+
+
+def trajectory_3d(scenarios, splits, street, dataset_dir, out_dir, split, frame_frac,
+                  vmin, vmax, elev, azim):
+    """One PNG per K, using the scenario's own stored sensor layout."""
+    sens = np.load(os.path.join(dataset_dir, "sensors", f"sensors_{split}.npz"))
+    cells_all, offsets, dens = sens["cells"], sens["offsets"], sens["density_pct"]
+
+    for k, d in scenarios:
+        cube = np.load(os.path.join(d, "rss_aggregated.npy"), mmap_mode="r")
+        labels = np.load(os.path.join(d, "labels.npz"))
+        name = os.path.basename(d)
+
+        # scenario_id is <split>_<index>_k<K>, and sensors/*.npz is in that index order
+        idx = int(name.split("_")[1])
+        cells = cells_all[offsets[idx]:offsets[idx + 1]]
+
+        t = min(int(frame_frac * cube.shape[0]), cube.shape[0] - 1)
+        at_t = labels["frame"] == t
+        plot_rss_3d(
+            np.asarray(cube[t]).astype(np.float32), cells, street, splits["grid"],
+            jammers=np.column_stack([labels["x"][at_t], labels["y"][at_t]]),
+            vmin=vmin, vmax=vmax, elev=elev, azim=azim,
+            title=(f"{name} - K={k} jammers, frame {t}/{cube.shape[0] - 1}, "
+                   f"{dens[idx]:.0f}% sensor density ({len(cells)} sensors)"),
+            filename=os.path.join(out_dir, f"trajectory_{split}_k{k:02d}_3d.png"),
+        )
 
 
 def trajectory_gifs(scenarios, buildings, out_dir, b, vmin, vmax, fps):
@@ -152,37 +245,57 @@ def main():
     p.add_argument("--gif", action="store_true",
                    help="Also write one GIF per previewed trajectory scenario")
     p.add_argument("--fps", type=int, default=5)
+    p.add_argument("--3d", dest="three_d", action="store_true",
+                   help="Also write one 3D PNG per K: street plan plus sensor readings")
+    p.add_argument("--sheet", dest="sheet", action="store_true", default=None,
+                   help="Write the contact sheets (default unless --3d is given alone)")
+    p.add_argument("--elev", type=float, default=34.0, help="3D elevation angle")
+    p.add_argument("--azim", type=float, default=-120.0, help="3D azimuth angle")
     args = p.parse_args()
+
+    # --3d on its own means "just the 3D views"; --sheet --3d gives both.
+    want_sheet = args.sheet if args.sheet is not None else not args.three_d
 
     out_dir = args.out_dir or os.path.join(args.dataset_dir, "previews")
     os.makedirs(out_dir, exist_ok=True)
 
     extent = build_extent(args.map_bounds_b)
-    buildings = load_buildings(args.mesh_dir)
+    buildings = load_buildings(args.mesh_dir) if want_sheet else []
     ks = list(range(args.max_k + 1))
+
+    splits = load_splits(args.dataset_dir)
+    street = street_mask_from_splits(splits) if args.three_d else None
 
     if args.branch in ("static", "both"):
         split_dir = os.path.join(args.dataset_dir, "multi_static_jammers", args.split)
         print(f"static: {split_dir}")
-        panels = static_panels(split_dir, ks)
-        plot_rss_sheet(
-            panels, extent, buildings=buildings, vmin=args.vmin, vmax=args.vmax,
-            ncols=args.ncols,
-            suptitle=f"Detector samples (multi_static_jammers/{args.split}) - one per K",
-            filename=os.path.join(out_dir, f"static_{args.split}_by_k.png"),
-        )
+        picks = static_pick(split_dir, ks)
+        if want_sheet:
+            plot_rss_sheet(
+                static_panels(split_dir, picks), extent, buildings=buildings,
+                vmin=args.vmin, vmax=args.vmax, ncols=args.ncols,
+                suptitle=f"Detector samples (multi_static_jammers/{args.split}) - one per K",
+                filename=os.path.join(out_dir, f"static_{args.split}_by_k.png"),
+            )
+        if args.three_d:
+            static_3d(split_dir, picks, splits, street, out_dir, args.split,
+                      args.vmin, args.vmax, args.elev, args.azim)
 
     if args.branch in ("trajectory", "both"):
         split_dir = os.path.join(args.dataset_dir, "multi_trajectory_jammers", args.split)
         print(f"trajectory: {split_dir}")
         scenarios = trajectory_scenarios(split_dir, ks)
-        panels = trajectory_panels(scenarios, args.frame_frac)
-        plot_rss_sheet(
-            panels, extent, buildings=buildings, vmin=args.vmin, vmax=args.vmax,
-            ncols=args.ncols,
-            suptitle=f"Tracking scenarios (multi_trajectory_jammers/{args.split}) - one per K",
-            filename=os.path.join(out_dir, f"trajectory_{args.split}_by_k.png"),
-        )
+        if want_sheet:
+            plot_rss_sheet(
+                trajectory_panels(scenarios, args.frame_frac), extent, buildings=buildings,
+                vmin=args.vmin, vmax=args.vmax, ncols=args.ncols,
+                suptitle=f"Tracking scenarios (multi_trajectory_jammers/{args.split}) - one per K",
+                filename=os.path.join(out_dir, f"trajectory_{args.split}_by_k.png"),
+            )
+        if args.three_d:
+            trajectory_3d(scenarios, splits, street, args.dataset_dir, out_dir,
+                          args.split, args.frame_frac, args.vmin, args.vmax,
+                          args.elev, args.azim)
         if args.gif:
             trajectory_gifs(scenarios, buildings, out_dir, args.map_bounds_b,
                             args.vmin, args.vmax, args.fps)

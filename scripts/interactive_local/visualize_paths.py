@@ -309,7 +309,8 @@ def main():
 
     if not os.path.isdir(folder):
         print(f"Error: dataset folder not found: {folder}")
-        print("Example: python scripts/interactive_local/visualize_paths.py --folder ./datasets/NYC_3jammer")
+        print("Example: python scripts/interactive_local/visualize_paths.py "
+              "--folder ./datasets/batch_simulation_nyc/single_trajectory_jammers")
         sys.exit(1)
 
     if not os.path.isdir(meshes):

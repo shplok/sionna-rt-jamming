@@ -192,6 +192,69 @@ def plot_rss_panel(ax, rss, extent, buildings=None, jammers=None, vmin=-145, vma
     return im
 
 
+def plot_rss_3d(rss, sensor_idx, street_mask, grid, jammers=None, vmin=-145, vmax=0,
+                title=None, cbar_label='RSS (dBW)', filename="rss_3d.png",
+                elev=34, azim=-120, dpi=110):
+    """
+    3D view of one scenario: street plan on the floor, sensor readings above it.
+
+    Only the cells in sensor_idx are drawn, so this shows what the detector actually
+    sees rather than the dense field. Height and colour both encode RSS in dBW.
+
+    rss          (H, W) array indexed [row, col].
+    sensor_idx   flat cell indices (row * n_cells + col) of this scenario's sensors.
+    street_mask  (H, W) bool, True where a cell is street (placeable).
+    grid         dict with n_cells, cell_size_m, origin_m - straight from splits.json.
+    jammers      optional (K, 2) ground-truth x, y in metres, drawn as vertical stems.
+    """
+    n = int(grid["n_cells"])
+    cell = float(grid["cell_size_m"])
+    x0, y0 = (float(v) for v in grid["origin_m"])
+
+    fig = plt.figure(figsize=(12, 9))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Floor: the street plan, so the readings are legible against the city layout.
+    xs = x0 + (np.arange(n) + 0.5) * cell
+    ys = y0 + (np.arange(n) + 0.5) * cell
+    X, Y = np.meshgrid(xs, ys)
+    ax.contourf(X, Y, street_mask.astype(float), levels=[-0.5, 0.5, 1.5],
+                colors=['#b0b0b0', '#fafafa'], zdir='z', offset=vmin, alpha=0.9)
+
+    rows, cols = np.divmod(np.asarray(sensor_idx, dtype=np.int64), n)
+    sx = x0 + (cols + 0.5) * cell
+    sy = y0 + (rows + 0.5) * cell
+    sz = np.asarray(rss, dtype=np.float32)[rows, cols]
+
+    sc = ax.scatter(sx, sy, sz, c=sz, cmap='viridis', vmin=vmin, vmax=vmax,
+                    s=4, depthshade=False)
+
+    if jammers is not None and len(jammers):
+        j = np.asarray(jammers, dtype=float).reshape(-1, 2)
+        for jx, jy in j:
+            ax.plot([jx, jx], [jy, jy], [vmin, vmax], color='crimson',
+                    linewidth=1.2, alpha=0.9, zorder=10)
+        ax.scatter(j[:, 0], j[:, 1], np.full(len(j), vmax), color='white',
+                   edgecolor='crimson', s=55, marker='o', depthshade=False, zorder=11)
+
+    ax.set_xlim(x0, x0 + n * cell)
+    ax.set_ylim(y0, y0 + n * cell)
+    ax.set_zlim(vmin, vmax)
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel(cbar_label)
+    ax.view_init(elev=elev, azim=azim)
+    if title:
+        ax.set_title(title, fontsize=11)
+
+    cbar = fig.colorbar(sc, ax=ax, fraction=0.025, pad=0.08)
+    cbar.set_label(cbar_label)
+
+    fig.savefig(filename, dpi=dpi, bbox_inches="tight")
+    print(f"3D view saved to: {filename}")
+    plt.close(fig)
+
+
 def plot_rss_sheet(panels, extent, buildings=None, vmin=-145, vmax=0, ncols=4,
                    suptitle=None, cbar_label='RSS (dBW)', filename="rss_sheet.png", dpi=110):
     """
