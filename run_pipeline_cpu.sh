@@ -63,7 +63,7 @@ sionna_activate_env || exit 1
 echo "python: $(command -v python)"
 
 echo -e "\n[B1/4] splits: trajectory pools, scenarios, static positions, sensors"
-python scripts/make_splits.py \
+python scripts/batch_cluster/make_splits.py \
     --dataset-dir "$DATASET_DIR" --mesh-dir "$SCENE_DIR/mesh" \
     --cell-size "$CELL_SIZE" --map-bounds-b "$MAP_BOUNDS_B" \
     --n-train "$N_TRAIN" --n-val "$N_VAL" --n-test "$N_TEST" \
@@ -73,7 +73,7 @@ python scripts/make_splits.py \
     --k-balance stratified --densities $DENSITIES --street-only --seed 42
 
 echo -e "\n[B2/4] labels"
-python scripts/make_labels.py --dataset-dir "$DATASET_DIR"
+python scripts/batch_cluster/make_labels.py --dataset-dir "$DATASET_DIR"
 
 echo -e "\n[B3/4] aggregation"
 COMMON="--dataset-dir $DATASET_DIR --map-bounds-b $MAP_BOUNDS_B \
@@ -85,7 +85,7 @@ echo "  detector samples (~18 GB)"
 python main_batch_cluster.py --action aggregate_static $COMMON
 
 echo -e "\n[B4/4] validating the generated dataset"
-python scripts/validate_dataset.py --dataset-dir "$DATASET_DIR"
+python scripts/batch_cluster/validate_dataset.py --dataset-dir "$DATASET_DIR"
 
 echo -e "\n=== CPU stage done: $(date) ==="
 echo "Dataset root: $DATASET_DIR"

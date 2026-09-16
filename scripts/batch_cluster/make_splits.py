@@ -30,10 +30,10 @@ Layout assumed (paths derived from --dataset-dir):
         multi_trajectory_jammers/    tracking scenarios
         multi_static_jammers/        detector samples
         splits.json                  <- this script
-        labels/  sensors/            <- scripts/make_labels.py, this script
+        labels/  sensors/            <- scripts/batch_cluster/make_labels.py, this script
 
 Usage:
-    python scripts/make_splits.py \
+    python scripts/batch_cluster/make_splits.py \
         --dataset-dir ./datasets/batch_simulation_nyc \
         --mesh-dir ./data/NYC3KM_585751_4512036/mesh
 """
@@ -253,7 +253,7 @@ def subset_uniform_scenarios(pool, n_scen, k_min, k_max, rng):
 # -----------------------------------------------------------------------------
 def building_mask(mesh_dir, n_cells, b, cell_size):
     """True where a cell centre falls inside a building footprint."""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     from utils.scene_objects import gather_bboxes
 
     obstacles = gather_bboxes(mesh_dir, footprints=False, use_cache=True)

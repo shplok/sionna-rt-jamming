@@ -16,6 +16,8 @@ from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.patches import Rectangle
 from tkinter import ttk
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from utils.scene_objects import gather_bboxes
 
 # Defaults aligned with main_interactive_local.py
@@ -307,12 +309,12 @@ def main():
 
     if not os.path.isdir(folder):
         print(f"Error: dataset folder not found: {folder}")
-        print("Example: python visualize_paths.py --folder ./datasets/NYC_3jammer")
+        print("Example: python scripts/interactive_local/visualize_paths.py --folder ./datasets/NYC_3jammer")
         sys.exit(1)
 
     if not os.path.isdir(meshes):
         print(f"Error: mesh folder not found: {meshes}")
-        print("Example: python visualize_paths.py --meshes ./data/NYC3KM_585751_4512036/mesh")
+        print("Example: python scripts/interactive_local/visualize_paths.py --meshes ./data/NYC3KM_585751_4512036/mesh")
         sys.exit(1)
 
     root = tk.Tk()

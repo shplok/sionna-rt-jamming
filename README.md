@@ -132,9 +132,9 @@ holding a GPU reservation through the CPU half would waste it.
 | `run_pipeline_gpu.sh` | SLURM job — **ray tracing only**, needs a GPU |
 | `run_pipeline_cpu.sh` | SLURM job — everything after, **no GPU**, 64 GB RAM |
 | `server_env.sh` | Per-site SLURM + conda profiles (`explorer`, `pomplun`) |
-| `scripts/make_splits.py` | Trajectory pools, scenarios, static position splits, sensors → `splits.json` |
-| `scripts/validate_dataset.py` | Post-generation checks; non-zero exit on failure |
-| `scripts/make_labels.py` | Per-frame jammer positions → `labels/` |
+| `scripts/batch_cluster/make_splits.py` | Trajectory pools, scenarios, static position splits, sensors → `splits.json` |
+| `scripts/batch_cluster/validate_dataset.py` | Post-generation checks; non-zero exit on failure |
+| `scripts/batch_cluster/make_labels.py` | Per-frame jammer positions → `labels/` |
 | `config.py` | Dataclasses for planner / strategy settings |
 | `core/engine.py` | Collision checks, trajectory sync, scene TX updates |
 | `core/strategies.py` | Path generation (Math, Waypoint, GraphNav) |
@@ -143,8 +143,8 @@ holding a GPU reservation through the CPU half would waste it.
 | `utils/scene_objects.py` | Antenna arrays, mesh bbox extraction (cached) |
 | `utils/plotter.py` | Plotting library — RSS animation GIF, single panels, contact sheets |
 | `utils/jammer_config.py` | Persists edited initial positions back to `main_interactive_local.py` |
-| `visualize_paths.py` | Tk GUI browser for saved path `.npy` files — **laptop only** |
-| `scripts/preview_dataset.py` | Headless contact sheets of the generated dataset, one panel per K |
+| `scripts/interactive_local/visualize_paths.py` | Tk GUI browser for saved path `.npy` files — **laptop only** |
+| `scripts/batch_cluster/preview_dataset.py` | Headless contact sheets of the generated dataset, one panel per K |
 | `data/<scene>/` | `simple_OSM_scene.xml` + `mesh/*.ply` |
 | `datasets/` | Generated outputs (**gitignored**) |
 
@@ -212,7 +212,7 @@ datasets/<DATASET_NAME>/
 Optional viewer:
 
 ```bash
-python visualize_paths.py --folder ./datasets/<NAME> --meshes ./data/NYC3KM_585751_4512036/mesh
+python scripts/interactive_local/visualize_paths.py --folder ./datasets/<NAME> --meshes ./data/NYC3KM_585751_4512036/mesh
 ```
 
 ---
@@ -224,8 +224,8 @@ Three pieces, split by *what kind of thing they are* rather than by which branch
 | | What it is | Backend | Runs where |
 |---|---|---|---|
 | `utils/plotter.py` | library of plotting functions — take arrays, write figures | — | anywhere |
-| `scripts/preview_dataset.py` | CLI that knows the dataset layout | `Agg` | **cluster or laptop** |
-| `visualize_paths.py` | Tk GUI application | `TkAgg` | **laptop only** |
+| `scripts/batch_cluster/preview_dataset.py` | CLI that knows the dataset layout | `Agg` | **cluster or laptop** |
+| `scripts/interactive_local/visualize_paths.py` | Tk GUI application | `TkAgg` | **laptop only** |
 
 `utils/plotter.py` holds the drawing and nothing else — no CLI, no knowledge of where files
 live:
@@ -239,20 +239,20 @@ live:
 
 ### Previewing the generated dataset
 
-`scripts/preview_dataset.py` writes contact sheets with **one panel per jammer count
+`scripts/batch_cluster/preview_dataset.py` writes contact sheets with **one panel per jammer count
 K = 0…10**, in the same style as the interactive GIF: viridis RSS, grey buildings, white
 ground-truth markers, one shared colour scale per sheet so brightness is comparable across
 panels.
 
 ```bash
 # both branches, K = 0..10, from the val split
-python scripts/preview_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
+python scripts/batch_cluster/preview_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
 
 # detector samples only
-python scripts/preview_dataset.py --branch static
+python scripts/batch_cluster/preview_dataset.py --branch static
 
 # tracking scenarios, plus one GIF per previewed scenario
-python scripts/preview_dataset.py --branch trajectory --gif
+python scripts/batch_cluster/preview_dataset.py --branch trajectory --gif
 ```
 
 Writes to `<dataset-dir>/previews/` (inside `datasets/`, so gitignored):
@@ -373,7 +373,7 @@ pip install --force-reinstall /tmp/drjit-wheel/drjit-1.5.0-cp311-cp311-linux_x86
 Verify on a GPU node — it must report `cuda_ad_mono_polarized`, not the LLVM fallback:
 
 ```bash
-srun --partition=gpu --gres=gpu:a100:1 --mem=8G --time=00:10:00      ./scripts/smoke_test.sh
+srun --partition=gpu --gres=gpu:a100:1 --mem=8G --time=00:10:00      ./scripts/batch_cluster/smoke_test.sh
 ```
 
 **Do not "fix" this by changing package versions.** sionna-rt 2.1.0 hard-pins
@@ -470,7 +470,7 @@ Ends with `validate_dataset.py` (non-zero exit on failure).
 **Step 6 — confirm.**
 
 ```bash
-python scripts/validate_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
+python scripts/batch_cluster/validate_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
 du -sh datasets/batch_simulation_nyc/*
 ```
 
@@ -542,18 +542,18 @@ python main_batch_cluster.py --action simulate_static $COMMON \
     --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 
 # --- CPU node ---
-python scripts/make_splits.py --dataset-dir $DS --mesh-dir $SCENE/mesh \
+python scripts/batch_cluster/make_splits.py --dataset-dir $DS --mesh-dir $SCENE/mesh \
     --cell-size 10 --map-bounds-b 1500 \
     --n-train 4000 --n-val 500 --n-test 500 \
     --n-static-train 70000 --n-static-val 15000 --n-static-test 15000 \
     --min-jammers 0 --max-jammers 10 \
     --k-balance stratified --densities 2 4 6 8 10 --street-only --seed 42
-python scripts/make_labels.py --dataset-dir $DS
+python scripts/batch_cluster/make_labels.py --dataset-dir $DS
 python main_batch_cluster.py --action aggregate        --dataset-dir $DS \
     --map-bounds-b 1500 --cell-size 10 10 --meas-noise-var 1.0 --precision float16
 python main_batch_cluster.py --action aggregate_static --dataset-dir $DS \
     --map-bounds-b 1500 --cell-size 10 10 --meas-noise-var 1.0 --precision float16
-python scripts/validate_dataset.py --dataset-dir $DS
+python scripts/batch_cluster/validate_dataset.py --dataset-dir $DS
 ```
 
 **`--max-depth 80`** is the ray-tracing bounce limit: how many times a ray may reflect off

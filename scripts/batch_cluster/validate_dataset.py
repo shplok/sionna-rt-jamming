@@ -11,8 +11,8 @@ Each check prints PASS / FAIL / SKIP. Exits non-zero if anything failed, so it c
 SLURM job. Branches that were not generated are skipped, not failed.
 
 Usage:
-    python scripts/validate_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
-    python scripts/validate_dataset.py --dataset-dir ... --quick   # skip array-wide reads
+    python scripts/batch_cluster/validate_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
+    python scripts/batch_cluster/validate_dataset.py --dataset-dir ... --quick   # skip array-wide reads
 """
 
 import argparse

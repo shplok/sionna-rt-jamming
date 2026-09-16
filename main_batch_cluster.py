@@ -23,7 +23,7 @@ DETECTION branch - jammers are static, one snapshot per sample:
                      -> single_static_jammers/, multi_static_jammers/
 
 Only the two simulate_* stages need a GPU. Everything else is NumPy and runs on a
-CPU node. Run scripts/make_splits.py after both simulate_* stages and before either
+CPU node. Run scripts/batch_cluster/make_splits.py after both simulate_* stages and before either
 aggregate stage. See README.md for the full sequence.
 
 Usage:
@@ -625,7 +625,7 @@ def run_aggregation_from_splits(args):
     Walking the stored scenario list (rather than drawing fresh random combinations) is
     what preserves the train/val/test trajectory separation and the stratified K
     distribution, and what keeps scenario ids lined up with the labels produced by
-    scripts/make_labels.py.
+    scripts/batch_cluster/make_labels.py.
 
     Base maps are loaded per split rather than all at once, so only that split's pool is
     resident (34 maps for train, 10 for val/test).
@@ -636,7 +636,7 @@ def run_aggregation_from_splits(args):
 
     if not os.path.exists(args.splits):
         raise FileNotFoundError(
-            f"{args.splits} not found. Run scripts/make_splits.py first."
+            f"{args.splits} not found. Run scripts/batch_cluster/make_splits.py first."
         )
     with open(args.splits, "r", encoding="utf-8") as f:
         splits = json.load(f)
@@ -880,11 +880,11 @@ def run_static_aggregation(args):
     print("=" * 70)
 
     if not os.path.exists(args.splits):
-        raise FileNotFoundError(f"{args.splits} not found. Run scripts/make_splits.py first.")
+        raise FileNotFoundError(f"{args.splits} not found. Run scripts/batch_cluster/make_splits.py first.")
     with open(args.splits, "r", encoding="utf-8") as f:
         splits = json.load(f)
     if "static" not in splits:
-        raise KeyError("splits.json has no 'static' section. Re-run scripts/make_splits.py "
+        raise KeyError("splits.json has no 'static' section. Re-run scripts/batch_cluster/make_splits.py "
                        "after generating single_static_jammers/positions.npy.")
 
     watts_path = os.path.join(args.static_dir, "watts.npy")

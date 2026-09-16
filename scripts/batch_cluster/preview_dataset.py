@@ -7,11 +7,11 @@ same style as the interactive GIF: viridis RSS, grey buildings, white ground-tru
 markers, one shared colour scale per sheet.
 
     # both branches, K = 0..10, from the val split
-    python scripts/preview_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
+    python scripts/batch_cluster/preview_dataset.py --dataset-dir ./datasets/batch_simulation_nyc
 
     # detector samples only, and also write a GIF per trajectory scenario
-    python scripts/preview_dataset.py --branch static
-    python scripts/preview_dataset.py --branch trajectory --gif
+    python scripts/batch_cluster/preview_dataset.py --branch static
+    python scripts/batch_cluster/preview_dataset.py --branch trajectory --gif
 """
 
 import argparse
@@ -25,7 +25,7 @@ matplotlib.use("Agg")
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from utils.plotter import create_jammer_animation, plot_rss_sheet
 from utils.scene_objects import gather_bboxes

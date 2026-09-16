@@ -23,7 +23,7 @@ Written twice, on purpose:
 The per-scenario copies total ~10 MB, so keeping both costs nothing.
 
 Usage:
-    python scripts/make_labels.py --dataset-dir ./datasets/batch_simulation_nyc
+    python scripts/batch_cluster/make_labels.py --dataset-dir ./datasets/batch_simulation_nyc
 """
 
 import argparse

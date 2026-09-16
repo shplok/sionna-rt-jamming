@@ -184,7 +184,7 @@ PYCHK
     # running here would fail. Only run in place if a GPU is actually visible.
     if [ -n "$IN_ALLOC" ] && nvidia-smi -L >/dev/null 2>&1; then
         echo "[submit] GPU visible in job $SLURM_JOB_ID -- running the smoke test here"
-        exec ./scripts/smoke_test.sh
+        exec ./scripts/batch_cluster/smoke_test.sh
     fi
     if [ -n "$IN_ALLOC" ]; then
         echo "[submit] inside job $SLURM_JOB_ID but no GPU here -- dispatching via srun"
@@ -194,7 +194,7 @@ PYCHK
     # strip this job's SLURM_* so the step is not constrained by a CPU allocation
     _clean srun --partition="$SIONNA_GPU_PARTITION" --gres="$SIONNA_GPU_GRES" \
            --nodes=1 --ntasks=1 --mem="$SIONNA_GPU_MEM" --time=00:30:00 $(_acct) \
-           ./scripts/smoke_test.sh
+           ./scripts/batch_cluster/smoke_test.sh
     ;;
 
   *)

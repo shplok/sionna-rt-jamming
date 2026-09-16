@@ -406,11 +406,11 @@ Everything derives from `--dataset-dir`. Only the two `simulate_*` stages need a
 | 2 | `simulate_bases` | **GPU** | ~13 min |
 | 3 | `generate_static` | CPU | seconds |
 | 4 | `simulate_static` | **GPU** | ~78 min at N=20 000 |
-| 5 | `scripts/make_splits.py` | CPU | ~2 min |
-| 6 | `scripts/make_labels.py` | CPU | seconds |
+| 5 | `scripts/batch_cluster/make_splits.py` | CPU | ~2 min |
+| 6 | `scripts/batch_cluster/make_labels.py` | CPU | seconds |
 | 7 | `aggregate` | CPU | ~69 GB out |
 | 8 | `aggregate_static` | CPU | ~18 GB out |
-| 9 | `scripts/validate_dataset.py` | CPU | minutes |
+| 9 | `scripts/batch_cluster/validate_dataset.py` | CPU | minutes |
 
 On the cluster that is two jobs, so the GPU reservation is released as soon as ray tracing
 finishes:
@@ -462,7 +462,7 @@ every shape, dtype and index path is real):
 |---|---|
 | ✅ | `generate`, `plot`, `simulate_bases`, `aggregate` — tracking branch |
 | ✅ | `generate_static`, `simulate_static`, `aggregate_static` — detection branch |
-| ✅ | `scripts/make_splits.py`, `make_labels.py`, `validate_dataset.py` |
+| ✅ | `scripts/batch_cluster/make_splits.py`, `make_labels.py`, `validate_dataset.py` |
 | ✅ | `run_pipeline_gpu.sh` / `run_pipeline_cpu.sh` — GPU and CPU jobs separated |
 | ✅ | Settled: 10 m grid, 20 000 positions → 14k/3k/3k, 70k/15k/15k samples, K 0–10 stratified, fixed TX power, σ = 1 dB, random position split |
 
@@ -479,7 +479,7 @@ every shape, dtype and index path is real):
 
 **Deferred, flagged in place.**
 
-- [x] `visualize_aggregated.py` — deleted; replaced by `scripts/preview_dataset.py`
+- [x] `visualize_aggregated.py` — deleted; replaced by `scripts/batch_cluster/preview_dataset.py`
 - [ ] `main_interactive_local.py` — `b = 750`, `cell_size = (8, 8)`, so its output is **not**
       comparable with this dataset (TODO at the top of its `main()`)
 
