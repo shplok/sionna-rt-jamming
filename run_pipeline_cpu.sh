@@ -79,7 +79,7 @@ echo -e "\n[B3/4] aggregation"
 COMMON="--dataset-dir $DATASET_DIR --map-bounds-b $MAP_BOUNDS_B \
         --cell-size $CELL_SIZE $CELL_SIZE --meas-noise-var $MEAS_NOISE_VAR \
         --precision $PRECISION"
-echo "  tracking scenarios (~46 GB)"
+echo "  tracking scenarios (~69 GB)"
 python main_batch_cluster.py --action aggregate $COMMON
 echo "  detector samples (~18 GB)"
 python main_batch_cluster.py --action aggregate_static $COMMON

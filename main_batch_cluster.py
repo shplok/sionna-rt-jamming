@@ -2,8 +2,9 @@
 """
 Sionna RT Jamming - batch dataset generation. CLUSTER ONLY.
 
-Headless, no GUI. Intended to run on the GPU cluster via run_pipeline.sh: the
-simulate_bases stage needs CUDA Sionna RT, and the full dataset is ~46 GB, which is
+Headless, no GUI. Intended to run on the cluster via ./submit.sh gpu then
+./submit.sh cpu, which submit run_pipeline_gpu.sh and run_pipeline_cpu.sh: the
+simulate_* stages want CUDA Sionna RT, and the full dataset is ~96 GB, which is
 why this is not meant for a laptop. For interactive path planning on your own
 machine use main_interactive_local.py instead.
 
@@ -23,8 +24,8 @@ DETECTION branch - jammers are static, one snapshot per sample:
                      -> single_static_jammers/, multi_static_jammers/
 
 Only the two simulate_* stages need a GPU. Everything else is NumPy and runs on a
-CPU node. Run scripts/batch_cluster/make_splits.py after both simulate_* stages and before either
-aggregate stage. See README.md for the full sequence.
+CPU node. Run scripts/batch_cluster/make_splits.py after both simulate_* stages
+and before either aggregate stage. See README.md for the full sequence.
 
 Usage:
     python main_batch_cluster.py --action all --dataset-dir ./datasets/batch_simulation_nyc

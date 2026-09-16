@@ -424,7 +424,7 @@ finishes:
 `single_static_jammers/positions.npy` to plan the detector samples, and skips the whole
 detection branch with a warning if that file is missing.
 
-`submit.sh` picks partition, gres, and account per site from `server_env.sh` (since `#SBATCH` directives can't be conditional). `run_pipeline.sh` is Luis's original single-job script (`eff898c4`), kept as reference — it predates the two-branch layout.
+`submit.sh` picks partition, gres, and account per site from `server_env.sh` (since `#SBATCH` directives can't be conditional).
 
 ### Memory, not compute, is the CPU constraint
 
