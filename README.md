@@ -100,7 +100,7 @@ detections it feeds to the tracker are **out-of-sample by construction**.
 | | Machine | GPU? | Stages |
 |---|---|---|---|
 | `main_interactive_local.py` | laptop | no | GUI planning, a handful of jammers |
-| `run_pipeline_gpu.sh` | cluster | **yes** | `generate`, `simulate_bases`, `generate_static`, `simulate_static` |
+| `run_pipeline_gpu.sh` | cluster | **2 of 4 stages** | `generate` [CPU], `simulate_bases` [**GPU**], `generate_static` [CPU], `simulate_static` [**GPU**] |
 | `run_pipeline_cpu.sh` | cluster | no | splits, labels, `aggregate`, `aggregate_static`, validation |
 
 The stages come in pairs: **`generate` decides *where* the jammers are, `simulate_bases`
@@ -109,6 +109,11 @@ the 54 trajectories and writes `traj_*.npy`, no radio involved, CPU-seconds.
 `simulate_bases` then ray traces one radio map per frame of those trajectories, which is the
 expensive GPU part. `generate_static` / `simulate_static` are the same division of labour for
 the static positions.
+
+So **only the two `simulate_*` stages actually need the GPU.** The `generate_*` stages never
+import Sionna or Mitsuba — those imports are local to `run_base_simulations()` and
+`run_static_simulation()` — and they run fine on a login node in seconds. They sit in the GPU
+job purely because each must precede its `simulate_*` partner and costs nothing to include.
 
 Submitting them as two jobs matters: ray tracing takes ~1.5 h, the CPU work takes longer, and
 holding a GPU reservation through the CPU half would waste it.
