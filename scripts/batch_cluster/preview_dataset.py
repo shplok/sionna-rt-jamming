@@ -27,7 +27,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from utils.plotter import create_jammer_animation, plot_rss_3d, plot_rss_sheet
+from utils.plotter import (create_jammer_animation, plot_dataset_stats,
+                           plot_density_ladder, plot_rss_3d, plot_rss_sheet)
 from utils.scene_objects import gather_bboxes
 
 
@@ -117,7 +118,7 @@ def static_panels(split_dir, picks):
         panels.append({
             "rss": d["rss"],
             "jammers": d["jammers"],
-            "title": f"K={k}  sample {i}  ({d['density']:.0f}% sensors)",
+            "title": f"K={k}  sample {i}  ({d['density']:g}% sensors)",
         })
     return panels
 
@@ -160,7 +161,7 @@ def static_3d(split_dir, picks, splits, street, out_dir, split, vmin, vmax, elev
             d["rss"], cells, street, splits["grid"], jammers=d["jammers"],
             vmin=vmin, vmax=vmax, elev=elev, azim=azim,
             title=(f"Detector sample {i} - K={k} jammers, "
-                   f"{d['density']:.0f}% sensor density ({len(cells)} sensors)"),
+                   f"{d['density']:g}% sensor density ({len(cells)} sensors)"),
             filename=os.path.join(out_dir, f"static_{split}_k{k:02d}_3d.png"),
         )
 
@@ -187,7 +188,7 @@ def trajectory_3d(scenarios, splits, street, dataset_dir, out_dir, split, frame_
             jammers=np.column_stack([labels["x"][at_t], labels["y"][at_t]]),
             vmin=vmin, vmax=vmax, elev=elev, azim=azim,
             title=(f"{name} - K={k} jammers, frame {t}/{cube.shape[0] - 1}, "
-                   f"{dens[idx]:.0f}% sensor density ({len(cells)} sensors)"),
+                   f"{dens[idx]:g}% sensor density ({len(cells)} sensors)"),
             filename=os.path.join(out_dir, f"trajectory_{split}_k{k:02d}_3d.png"),
         )
 
@@ -220,6 +221,72 @@ def trajectory_gifs(scenarios, buildings, out_dir, b, vmin, vmax, fps):
         )
 
 
+def density_ladder(split_dir, splits, street, out_dir, split, k, vmin, vmax):
+    """One jammer configuration rendered at every rung of the density ladder.
+
+    The ladder is the dataset's single most consequential design choice, and it is
+    invisible in the per-K contact sheets because each sample there carries whatever
+    density it happened to be assigned. Here the configuration is held fixed and only
+    the density varies, which is the comparison the ladder rationale actually makes.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from make_splits import draw_sensors
+
+    meta = np.load(os.path.join(split_dir, "meta.npz"))
+    hits = np.where(meta["num_jammers"] == k)[0]
+    if len(hits) == 0:
+        print(f"  density ladder: no K={k} sample in {split}, skipped")
+        return
+    i = int(hits[0])
+    d = static_sample(split_dir, i)
+
+    n = int(splits["grid"]["n_cells"])
+    placeable = np.asarray(splits["sensor_cells"], dtype=np.int64)
+    mask = np.zeros(n * n, dtype=bool)
+    mask[placeable] = True
+    seed = int(splits["static"]["samples"][split][i]["sensor_seed"])
+    passes = int(splits.get("relocation_passes", 5))
+
+    # Densest first, so the eye reads the ladder as losing information left to right.
+    layouts = []
+    for dens in sorted(splits["sensor_densities_pct"], reverse=True):
+        n_sens = int(round(n * n * dens / 100.0))
+        cells, _ = draw_sensors(placeable, mask, n, n_sens, seed, passes)
+        layouts.append((float(dens), cells))
+
+    plot_density_ladder(
+        d["rss"], layouts, street, splits["grid"], jammers=d["jammers"],
+        vmin=vmin, vmax=vmax,
+        suptitle=(f"Sensor-density ladder - detector sample {i} "
+                  f"({split} split, K={k} jammers, identical positions in every panel)"),
+        filename=os.path.join(out_dir, f"density_ladder_{split}_k{k:02d}.png"),
+    )
+
+
+def dataset_stats(split_dir, splits, out_dir, split):
+    """K balance, density balance, and sensors per receptive field."""
+    meta = np.load(os.path.join(split_dir, "meta.npz"))
+    kj, dp, ns = meta["num_jammers"], meta["sensor_density_pct"], meta["num_sensors"]
+
+    uk, ck = np.unique(kj, return_counts=True)
+    ud, cd = np.unique(dp, return_counts=True)
+    k_hist = {int(a): int(b) for a, b in zip(uk, ck)}
+    dens_counts = {float(a): int(b) for a, b in zip(ud, cd)}
+    n_by_d = {}
+    for a in ud:
+        vals = np.unique(ns[dp == a])
+        if len(vals) != 1:
+            print(f"  WARNING: density {a}% has non-unique num_sensors {vals}")
+        n_by_d[float(a)] = int(vals[0])
+
+    plot_dataset_stats(
+        k_hist, dens_counts, n_by_d,
+        suptitle=(f"Detector library balance - multi_static_jammers/{split}, "
+                  f"{len(kj):,} samples"),
+        filename=os.path.join(out_dir, f"stats_{split}.png"),
+    )
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -249,12 +316,19 @@ def main():
                    help="Also write one 3D PNG per K: street plan plus sensor readings")
     p.add_argument("--sheet", dest="sheet", action="store_true", default=None,
                    help="Write the contact sheets (default unless --3d is given alone)")
+    p.add_argument("--density-ladder", dest="density_ladder", action="store_true",
+                   help="One configuration at every density rung (static branch only)")
+    p.add_argument("--ladder-k", type=int, default=5,
+                   help="Which K to use for the density ladder (default: %(default)s)")
+    p.add_argument("--stats", action="store_true",
+                   help="K/density balance and sensors-per-receptive-field summary")
     p.add_argument("--elev", type=float, default=34.0, help="3D elevation angle")
     p.add_argument("--azim", type=float, default=-120.0, help="3D azimuth angle")
     args = p.parse_args()
 
-    # --3d on its own means "just the 3D views"; --sheet --3d gives both.
-    want_sheet = args.sheet if args.sheet is not None else not args.three_d
+    # Any explicit view selection means "just that view"; --sheet re-adds the sheets.
+    explicit = args.three_d or args.density_ladder or args.stats
+    want_sheet = args.sheet if args.sheet is not None else not explicit
 
     out_dir = args.out_dir or os.path.join(args.dataset_dir, "previews")
     os.makedirs(out_dir, exist_ok=True)
@@ -264,7 +338,8 @@ def main():
     ks = list(range(args.max_k + 1))
 
     splits = load_splits(args.dataset_dir)
-    street = street_mask_from_splits(splits) if args.three_d else None
+    street = (street_mask_from_splits(splits)
+              if (args.three_d or args.density_ladder) else None)
 
     if args.branch in ("static", "both"):
         split_dir = os.path.join(args.dataset_dir, "multi_static_jammers", args.split)
@@ -280,6 +355,11 @@ def main():
         if args.three_d:
             static_3d(split_dir, picks, splits, street, out_dir, args.split,
                       args.vmin, args.vmax, args.elev, args.azim)
+        if args.density_ladder:
+            density_ladder(split_dir, splits, street, out_dir, args.split,
+                           args.ladder_k, args.vmin, args.vmax)
+        if args.stats:
+            dataset_stats(split_dir, splits, out_dir, args.split)
 
     if args.branch in ("trajectory", "both"):
         split_dir = os.path.join(args.dataset_dir, "multi_trajectory_jammers", args.split)

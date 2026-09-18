@@ -14,6 +14,12 @@ datasets/*
 !datasets/*/
 datasets/*/*
 !datasets/*/README.md
+# ... and the preview figures the README embeds. Same reasoning as the README
+# itself: they are part of the design document, and without them the README
+# renders with broken images on GitHub. Only the figures referenced by the
+# README are committed, not the whole previews/ directory.
+!datasets/*/previews/
+!datasets/*/previews/*.png
 cache/
 data/*
 !data/clean_xml.py
