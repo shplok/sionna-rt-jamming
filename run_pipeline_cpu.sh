@@ -25,19 +25,19 @@ SCENE_DIR="./data/NYC3KM_585751_4512036"
 CELL_SIZE=10
 MAP_BOUNDS_B=1500
 
-# tracking scenarios
-N_TRAIN=4000
-N_VAL=500
-N_TEST=500
-
 # detector samples
 N_STATIC_TRAIN=70000
 N_STATIC_VAL=15000
 N_STATIC_TEST=15000
+
+# tracking scenarios
+N_TRAIN=4000
+N_VAL=500
+N_TEST=500
 MIN_JAMMERS=0               # 0 => noise-only negatives included
 MAX_JAMMERS=10
 MEAS_NOISE_VAR=1.0          # Gaussian dB noise; INR = 10*log10(10/var) = 10 dB
-DENSITIES="2 4 6 8 10"      # sensor densities, percent
+DENSITIES="6 3 1.5 0.75"    # sensor densities, percent (halving ladder; 0.75 is fractional)
 PRECISION="float16"
 
 set -e
@@ -62,7 +62,7 @@ DATASET_DIR="${DATASET_DIR:-${SIONNA_DATASET_ROOT:-./datasets}/batch_simulation_
 sionna_activate_env || exit 1
 echo "python: $(command -v python)"
 
-echo -e "\n[B1/4] splits: trajectory pools, scenarios, static positions, sensors"
+echo -e "\n[B1/4] splits: static positions, sample specs, trajectory pools, scenarios"
 python scripts/batch_cluster/make_splits.py \
     --dataset-dir "$DATASET_DIR" --mesh-dir "$SCENE_DIR/mesh" \
     --cell-size "$CELL_SIZE" --map-bounds-b "$MAP_BOUNDS_B" \
@@ -79,18 +79,18 @@ echo -e "\n[B3/4] aggregation"
 COMMON="--dataset-dir $DATASET_DIR --map-bounds-b $MAP_BOUNDS_B \
         --cell-size $CELL_SIZE $CELL_SIZE --meas-noise-var $MEAS_NOISE_VAR \
         --precision $PRECISION"
-echo "  tracking scenarios (~69 GB)"
-python main_batch_cluster.py --action aggregate $COMMON
 echo "  detector samples (~18 GB)"
 python main_batch_cluster.py --action aggregate_static $COMMON
+echo "  tracking scenarios (~69 GB)"
+python main_batch_cluster.py --action aggregate $COMMON
 
 echo -e "\n[B4/4] validating the generated dataset"
 python scripts/batch_cluster/validate_dataset.py --dataset-dir "$DATASET_DIR"
 
 echo -e "\n=== CPU stage done: $(date) ==="
 echo "Dataset root: $DATASET_DIR"
-echo "  single_trajectory_jammers/  54 trajectories + per-frame maps"
 echo "  single_static_jammers/      static positions + maps"
-echo "  multi_trajectory_jammers/   tracking scenarios"
 echo "  multi_static_jammers/       detector samples"
+echo "  single_trajectory_jammers/  54 trajectories + per-frame maps"
+echo "  multi_trajectory_jammers/   tracking scenarios"
 echo "  splits.json  labels/  sensors/"

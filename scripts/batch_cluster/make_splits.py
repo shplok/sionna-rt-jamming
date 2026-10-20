@@ -81,8 +81,11 @@ def parse_args():
 
     p.add_argument("--map-bounds-b", type=float, default=1500.0, help="Half-width in metres (default: 1500).")
     p.add_argument("--cell-size", type=float, default=10.0, help="Grid cell size in metres (default: 10).")
-    p.add_argument("--densities", type=float, nargs="+", default=[2.0, 4.0, 6.0, 8.0, 10.0],
-                   help="Sensor densities in percent (default: 2 4 6 8 10).")
+    p.add_argument("--densities", type=float, nargs="+", default=[6.0, 3.0, 1.5, 0.75],
+                   help="Sensor densities in percent (default: 6 3 1.5 0.75). Fractional "
+                        "values are supported and intended: the ladder halves each step so "
+                        "that sensors-per-receptive-field (289 cells at 17x17) spans "
+                        "17.3 -> 2.2. Counts are round(90000 * d/100), so 0.75%% -> 675.")
     p.add_argument("--street-only", dest="street_only", action="store_true", default=True,
                    help="Exclude cells inside buildings when placing sensors (default).")
     p.add_argument("--no-street-only", dest="street_only", action="store_false",
@@ -346,11 +349,20 @@ def assign_scenario_sensors(scenarios, placeable, densities, n_cells, rng):
     strictly more variety than that.)
 
     Storing a seed rather than the cell list keeps splits.json small: a 10 % draw is 9000
-    cells, and 5000 scenarios would be 45 M integers. Preprocessing regenerates the exact
-    set with:
+    cells, and 5000 scenarios would be 45 M integers.
 
-        pool = np.array(splits["sensor_cells"])
-        sel  = pool[np.random.default_rng(seed).choice(len(pool), n, replace=False)]
+    The seed alone is NOT enough to reproduce a layout -- draw_sensors() follows the
+    uniform draw with `passes` relocation passes, so regenerating means calling it, not
+    re-running the choice:
+
+        placeable = np.asarray(splits["sensor_cells"], dtype=np.int64)
+        mask = np.zeros(n_cells * n_cells, dtype=bool)   # flat (n*n,), not (n, n)
+        mask[placeable] = True
+        cells, radius = draw_sensors(placeable, mask, n_cells, n, seed, passes=5)
+
+    The tracking layouts are persisted for this reason (see build_sensor_layouts). The
+    static samples are not: they carry num_sensors + sensor_seed in meta.npz and are
+    redrawn with the call above.
     """
     total_cells = n_cells * n_cells
     counts = {d: int(round(total_cells * d / 100.0)) for d in densities}
@@ -362,9 +374,17 @@ def assign_scenario_sensors(scenarios, placeable, densities, n_cells, rng):
             f"--no-street-only to place sensors over the full grid."
         )
 
+    levels = sorted(densities)
     for split, scens in scenarios.items():
-        for sc in scens:
-            d = float(rng.choice(densities))
+        for i, sc in enumerate(scens):
+            # The rng.choice draw is KEPT and DISCARDED on purpose. Densities are pure
+            # preprocessing metadata, but position_ids and noise_seed -- which the frozen
+            # RSS cubes were generated from -- come from later draws on this same stream.
+            # Removing this draw would shift every subsequent value and desynchronise
+            # splits.json from the RSS on disk. Assign the level deterministically instead,
+            # which gives exactly equal counts per level rather than equal in expectation.
+            _ = rng.choice(densities)
+            d = float(levels[i % len(levels)])
             sc["sensor_density_pct"] = d
             sc["num_sensors"] = counts[d]
             sc["sensor_seed"] = int(rng.integers(0, 2**31 - 1))
@@ -440,10 +460,16 @@ def build_static_samples(pos_split, n_samples, k_min, k_max, densities, n_cells,
         base, extra = divmod(n, len(ks))
         want = {K: base + (1 if i < extra else 0) for i, K in enumerate(ks)}
         samples = []
+        levels = sorted(densities)
         for K in ks:
-            for _ in range(want[K]):
+            for j in range(want[K]):
                 sel = rng.choice(ids, size=min(K, len(ids)), replace=False) if K else []
-                d = float(rng.choice(densities))
+                # See assign_scenario_sensors: this draw is kept and discarded so that the
+                # sensor_seed / noise_seed stream below stays byte-identical to the stream
+                # the frozen rss.npy was built from. Cycling the level inside each K block
+                # balances the K x density cross product exactly, not just in expectation.
+                _ = rng.choice(densities)
+                d = float(levels[j % len(levels)])
                 samples.append({
                     "position_ids": [int(v) for v in sel],
                     "num_jammers": int(len(sel)),

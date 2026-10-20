@@ -109,6 +109,37 @@ def main():
                (BAD, f"count mismatch in {bad}")
     check("sensor layout sizes match num_sensors", sensor_counts)
 
+    def density_ladder():
+        """num_sensors must be round(total_cells * d/100) for every declared density.
+
+        Densities are fractional (0.75 %), so this is the check that catches an int()
+        truncating 675 to 0, and any drift between the declared ladder and what the
+        samples actually carry.
+        """
+        total = sp["grid"]["n_cells"] ** 2
+        declared = sorted(float(d) for d in sp["sensor_densities_pct"])
+        want = {d: int(round(total * d / 100.0)) for d in declared}
+        if any(v <= 0 for v in want.values()):
+            return (BAD, f"a declared density rounds to zero sensors: {want}")
+        seen = set()
+        for s_ in ("train", "val", "test"):
+            for x in sp["scenarios"][s_]:
+                d = float(x["sensor_density_pct"]); seen.add(d)
+                if x["num_sensors"] != want.get(d):
+                    return (BAD, f"{x['scenario_id']}: {d}% -> {x['num_sensors']}, want {want.get(d)}")
+            m = np.load(P("multi_static_jammers", s_, "meta.npz"))
+            md, mn = m["sensor_density_pct"].astype(float), m["num_sensors"]
+            for d in np.unique(md):
+                d = float(d); seen.add(d)
+                if d not in want:
+                    return (BAD, f"{s_}: meta.npz has undeclared density {d}%")
+                if not np.all(mn[md == d] == want[d]):
+                    return (BAD, f"{s_}: {d}% samples do not all carry {want[d]} sensors")
+        if seen != set(declared):
+            return (BAD, f"declared {declared} but data uses {sorted(seen)}")
+        return (OK, ", ".join(f"{d:g}%={want[d]}" for d in declared))
+    check("density ladder: num_sensors matches the declared percentages", density_ladder)
+
     # ------------------------------------------------- tracking: base radio maps
     print("\nsingle_trajectory_jammers/  [tracking base]")
     rm_dir = P("single_trajectory_jammers", "radio_maps")

@@ -56,26 +56,26 @@ COMMON="--dataset-dir $DATASET_DIR --scene-path $SCENE_DIR/simple_OSM_scene.xml 
         --mesh-dir $SCENE_DIR/mesh --map-bounds-b $MAP_BOUNDS_B \
         --cell-size $CELL_SIZE $CELL_SIZE --seed 42"
 
+# --- detection branch ---------------------------------------------------------
+echo -e "\n[A1/4] static positions (CPU, seconds)"
+python main_batch_cluster.py --action generate_static $COMMON \
+    --n-static $N_STATIC --z-height 1.5
+
+echo -e "\n[A2/4] static radio maps (GPU, ~78 min at N=20000)"
+python main_batch_cluster.py --action simulate_static $COMMON \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
+
 # --- tracking branch ----------------------------------------------------------
-echo -e "\n[A1/4] trajectories (CPU, seconds)"
+echo -e "\n[A3/4] trajectories (CPU, seconds)"
 python main_batch_cluster.py --action generate $COMMON \
     --durations 30 60 90 --velocities 3 9 15 --count-per-combo 6 \
     --mode straight --max-overlap-ratio 0.75 --proximity-threshold 20.0 \
     --z-height 1.5 --time-step 1.0
 
-echo -e "\n[A2/4] trajectory radio maps (GPU, ~13 min)"
+echo -e "\n[A4/4] trajectory radio maps (GPU, ~13 min)"
 # NOTE: resumes by filename and does NOT check the grid. If you change CELL_SIZE,
 # delete $DATASET_DIR/single_trajectory_jammers/radio_maps first.
 python main_batch_cluster.py --action simulate_bases $COMMON \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
-
-# --- detection branch ---------------------------------------------------------
-echo -e "\n[A3/4] static positions (CPU, seconds)"
-python main_batch_cluster.py --action generate_static $COMMON \
-    --n-static $N_STATIC --z-height 1.5
-
-echo -e "\n[A4/4] static radio maps (GPU, ~78 min at N=20000)"
-python main_batch_cluster.py --action simulate_static $COMMON \
     --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 
 echo -e "\n=== GPU stage done: $(date) ==="

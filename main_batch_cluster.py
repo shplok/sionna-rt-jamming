@@ -61,12 +61,12 @@ def parse_args():
     parser.add_argument(
         "--action",
         type=str,
-        choices=["all", "generate", "plot", "simulate_bases", "aggregate",
-                 "generate_static", "simulate_static", "aggregate_static"],
+        choices=["all", "generate_static", "simulate_static", "aggregate_static",
+                 "generate", "plot", "simulate_bases", "aggregate"],
         default="all",
-        help="Pipeline stage. TRACKING branch: generate -> plot -> simulate_bases [GPU] "
-             "-> aggregate. DETECTION branch: generate_static -> simulate_static [GPU] "
-             "-> aggregate_static. Only the two simulate_* stages need a GPU; everything "
+        help="Pipeline stage. DETECTION branch: generate_static -> simulate_static [GPU] "
+             "-> aggregate_static. TRACKING branch: generate -> plot -> simulate_bases [GPU] "
+             "-> aggregate. Only the two simulate_* stages need a GPU; everything "
              "else is CPU. 'all' runs the tracking branch only - run the static stages "
              "explicitly.",
     )
@@ -1005,6 +1005,17 @@ def main():
                   "z": [args.z_height, args.z_height]}
         engine = MotionEngine(scene=None, obstacles=obstacles, bounds=bounds)
 
+    # --- detection branch ---
+    if args.action == "generate_static":
+        run_static_generation(args)
+
+    if args.action == "simulate_static":
+        run_static_simulation(args)
+
+    if args.action == "aggregate_static":
+        run_static_aggregation(args)
+
+    # --- tracking branch (this chain is what "all" runs, in this order) ---
     if args.action in ["all", "generate"]:
         run_generation(args, engine)
 
@@ -1016,15 +1027,6 @@ def main():
 
     if args.action in ["all", "aggregate"]:
         run_aggregation_from_splits(args)
-
-    if args.action == "generate_static":
-        run_static_generation(args)
-
-    if args.action == "simulate_static":
-        run_static_simulation(args)
-
-    if args.action == "aggregate_static":
-        run_static_aggregation(args)
 
     print("\n" + "=" * 70)
     print(f"Action '{args.action}' completed successfully!")

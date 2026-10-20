@@ -100,15 +100,15 @@ detections it feeds to the tracker are **out-of-sample by construction**.
 | | Machine | GPU? | Stages |
 |---|---|---|---|
 | `main_interactive_local.py` | laptop | no | GUI planning, a handful of jammers |
-| `run_pipeline_gpu.sh` | cluster | **2 of 4 stages** | `generate` [CPU], `simulate_bases` [**GPU**], `generate_static` [CPU], `simulate_static` [**GPU**] |
-| `run_pipeline_cpu.sh` | cluster | no | splits, labels, `aggregate`, `aggregate_static`, validation |
+| `run_pipeline_gpu.sh` | cluster | **2 of 4 stages** | `generate_static` [CPU], `simulate_static` [**GPU**], `generate` [CPU], `simulate_bases` [**GPU**] |
+| `run_pipeline_cpu.sh` | cluster | no | splits, labels, `aggregate_static`, `aggregate`, validation |
 
-The stages come in pairs: **`generate` decides *where* the jammers are, `simulate_bases`
-computes *what the radio field looks like* there.** `generate` is pure geometry — it lays out
-the 54 trajectories and writes `traj_*.npy`, no radio involved, CPU-seconds.
-`simulate_bases` then ray traces one radio map per frame of those trajectories, which is the
-expensive GPU part. `generate_static` / `simulate_static` are the same division of labour for
-the static positions.
+The stages come in pairs: **`generate_*` decides *where* the jammers are, `simulate_*`
+computes *what the radio field looks like* there.** `generate_static` is pure geometry — it
+draws the static jammer positions, no radio involved, CPU-seconds. `simulate_static` then ray
+traces one radio map per position, which is the expensive GPU part. `generate` /
+`simulate_bases` are the same division of labour for the tracking branch: `generate` lays out
+the 54 trajectories and writes `traj_*.npy`, `simulate_bases` ray traces one map per frame.
 
 So **only the two `simulate_*` stages actually need the GPU.** The `generate_*` stages never
 import Sionna or Mitsuba — those imports are local to `run_base_simulations()` and
@@ -281,7 +281,7 @@ python scripts/batch_cluster/preview_dataset.py --3d --elev 20 --azim -60
 ```
 
 This is the view that shows what the detector actually receives: only sensor cells, not the
-dense field. Sensor density varies per sample (2–10 %), and the title records which. The two
+dense field. Sensor density varies per sample (**6 / 3 / 1.5 / 0.75 %**, equal counts per level), and the title records which. The two
 branches get their layouts differently — trajectory scenarios read theirs from
 `sensors/sensors_{split}.npz`, detector samples have theirs redrawn from `sensor_seed` (see
 the warning in the detector section below).
@@ -537,14 +537,14 @@ datasets/batch_simulation_<tag>/     <- --dataset-dir
 **Only stages A2 and A4 need the GPU.**
 
 ```bash
-sbatch run_pipeline_gpu.sh     # A1 trajectories       [CPU, seconds]
-                               # A2 trajectory maps    [GPU, ~13 min]
-                               # A3 static positions   [CPU, seconds]
-                               # A4 static maps        [GPU, ~78 min]
+sbatch run_pipeline_gpu.sh     # A1 static positions   [CPU, seconds]
+                               # A2 static maps        [GPU, ~78 min]
+                               # A3 trajectories       [CPU, seconds]
+                               # A4 trajectory maps    [GPU, ~13 min]
 
 sbatch run_pipeline_cpu.sh     # B1 splits.json        [CPU]
                                # B2 labels             [CPU]
-                               # B3 aggregate + aggregate_static  [CPU, ~64 GB out]
+                               # B3 aggregate_static + aggregate  [CPU, ~86 GB out]
                                # B4 validate_dataset.py           [CPU]
 ```
 
@@ -557,12 +557,12 @@ COMMON="--dataset-dir $DS --scene-path $SCENE/simple_OSM_scene.xml \
         --mesh-dir $SCENE/mesh --map-bounds-b 1500 --cell-size 10 10 --seed 42"
 
 # --- GPU node ---
+python main_batch_cluster.py --action generate_static $COMMON --n-static 20000
+python main_batch_cluster.py --action simulate_static $COMMON \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 python main_batch_cluster.py --action generate        $COMMON \
     --durations 30 60 90 --velocities 3 9 15 --count-per-combo 6
 python main_batch_cluster.py --action simulate_bases  $COMMON \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
-python main_batch_cluster.py --action generate_static $COMMON --n-static 20000
-python main_batch_cluster.py --action simulate_static $COMMON \
     --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 
 # --- CPU node ---
@@ -571,11 +571,11 @@ python scripts/batch_cluster/make_splits.py --dataset-dir $DS --mesh-dir $SCENE/
     --n-train 4000 --n-val 500 --n-test 500 \
     --n-static-train 70000 --n-static-val 15000 --n-static-test 15000 \
     --min-jammers 0 --max-jammers 10 \
-    --k-balance stratified --densities 2 4 6 8 10 --street-only --seed 42
+    --k-balance stratified --densities 6 3 1.5 0.75 --street-only --seed 42
 python scripts/batch_cluster/make_labels.py --dataset-dir $DS
-python main_batch_cluster.py --action aggregate        --dataset-dir $DS \
-    --map-bounds-b 1500 --cell-size 10 10 --meas-noise-var 1.0 --precision float16
 python main_batch_cluster.py --action aggregate_static --dataset-dir $DS \
+    --map-bounds-b 1500 --cell-size 10 10 --meas-noise-var 1.0 --precision float16
+python main_batch_cluster.py --action aggregate        --dataset-dir $DS \
     --map-bounds-b 1500 --cell-size 10 10 --meas-noise-var 1.0 --precision float16
 python scripts/batch_cluster/validate_dataset.py --dataset-dir $DS
 ```
