@@ -141,6 +141,8 @@ holding a GPU reservation through the CPU half would waste it.
 | `core/trajectory_generator.py` | Headless straight-corridor trajectory generation |
 | `ui/` | Tkinter menus and planners |
 | `utils/scene_objects.py` | Antenna arrays, mesh bbox extraction (cached) |
+| `utils/map_cleaning.py` | Radio-map cleaning: median of solver seeds + despiking (`--clean-seeds`) |
+| `tests/test_map_cleaning.py` | Tests for the cleaning (CPU) |
 | `utils/plotter.py` | Plotting library — RSS animation GIF, single panels, contact sheets |
 | `utils/jammer_config.py` | Persists edited initial positions back to `main_interactive_local.py` |
 | `scripts/interactive_local/visualize_paths.py` | Tk GUI browser for saved path `.npy` files — **laptop only** |
@@ -508,6 +510,7 @@ du -sh datasets/batch_simulation_nyc/*
 | `Base maps are 375x375 but splits.json expects 300x300` | Stale library — same fix as above |
 | `splits.json has no 'static' section` | `make_splits.py` ran before `generate_static`. Re-run it |
 | GPU job preempted mid-`simulate_static` | Harmless — it checkpoints every 50 positions to `watts.progress.json`. Just resubmit |
+| `REFUSING: ... map_cleaning.json records the cleaning ...` | The folder was made with other `--clean-seeds` / despike settings (or none). Use the recorded ones, or a new `--dataset-dir` — see Radio-map cleaning |
 
 #### Timing and footprint
 
@@ -528,6 +531,7 @@ datasets/batch_simulation_<tag>/     <- --dataset-dir
 ├── single_trajectory_jammers/   54 trajectories + per-frame maps    [GPU]
 ├── multi_trajectory_jammers/    tracking scenarios, train/val/test  [CPU]
 ├── single_static_jammers/       positions.npy + watts.npy           [GPU]
+│                                (+ map_cleaning.json in every map folder)
 ├── multi_static_jammers/        detector samples, train/val/test    [CPU]
 ├── splits.json  ·  labels/  ·  sensors/
 ```
@@ -595,6 +599,72 @@ little here because runtime is dominated by `--samples-per-tx`.
 - **`simulate_static` checkpoints every 50 positions** to `watts.progress.json` — a preempted job resumes rather than restarting.
 - **RAM is the CPU-side constraint:** `aggregate` holds one pool (~1.4 GB); `aggregate_static` memmaps the 7.2 GB static library.
 - **`datasets/` is gitignored** — move results off the node yourself.
+
+### Radio-map cleaning (`--clean-seeds`)
+
+**Why.** `RadioMapSolver` is a Monte-Carlo estimator, and with the jammer and the
+measurement plane at the same height (1.5 m) a diffracted ray that hits a cell at a grazing
+angle gets a huge integration weight (`_diffraction_integration_weight` in Sionna's
+`radio_map.py`). One such ray turns one cell into an isolated spike, tens of dB above its
+neighbours and sometimes above the transmit power. Changing the solver seed moves the
+spikes to other cells. Sionna is not patched; the generator cleans the maps instead.
+
+**What it does** (`utils/map_cleaning.py`, per single-jammer map, before any aggregation):
+
+1. trace the map once per seed and take the per-cell **median**;
+2. **despike**: a cell more than `--despike-db` (20) dB above *all 8* neighbours, more than
+   `--despike-excl-m` (30) m from the jammer and above `--despike-floor-dbw` (−100 dBW)
+   gets the median of its neighbours;
+3. **cap**: cells above the transmit power (`--power-dbw`, 10 dBW = 10 W) get the neighbour
+   median, at most 5 times, then are clipped to it;
+4. NaN / inf cells get the neighbour median.
+
+A clump of two or more adjacent spiky cells is not caught by step 2 (each has a high
+neighbour); step 3 still bounds it.
+
+**Running it.** Add `--clean-seeds 42 7 123` to `simulate_static` and `simulate_bases`
+(these are the seeds of the cleaned datasets). Without the flag nothing changes: one trace
+per map, solver default seed. `--raw-maps-dir DIR` also keeps the raw per-seed maps and
+the per-map counts of cleaned cells (`clean_counts*.npy`: despike, cap, non-finite,
+touched). Ray tracing takes **3× as long** (about 4 h for 20 000 static positions plus
+40 min for the trajectories), so raise `--time`, or split the work:
+
+```bash
+# static positions over several GPU jobs
+python main_batch_cluster.py --action init_static_ranges  $COMMON --clean-seeds 42 7 123   # CPU, once
+python main_batch_cluster.py --action simulate_static     $COMMON --clean-seeds 42 7 123 \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --static-range 0 5000      # one job per range
+python main_batch_cluster.py --action merge_static_ranges $COMMON --clean-seeds 42 7 123   # CPU, once
+# trajectories over N GPU jobs, then once more without --traj-shard to write the manifest
+python main_batch_cluster.py --action simulate_bases $COMMON --clean-seeds 42 7 123 \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --traj-shard 0 4           # ... 3 4
+```
+
+Every range job writes its own part files under `single_static_jammers/range_parts/`
+(resumable). The merge checks that the ranges cover every position exactly once, copies
+them in, verifies the copy and deletes the parts. With the shell scripts:
+`CLEAN_SEEDS="42 7 123" DATASET_DIR=... sbatch --time=08:00:00 run_pipeline_gpu.sh`.
+
+**Provenance.** Every map folder gets a `map_cleaning.json` (method, seeds, thresholds, cap,
+noise floor, Sionna version, date), and the settings are also stored in
+`radio_maps_manifest.json`, each `rm_*.json` and `watts.progress.json`. The aggregate stages
+copy the record into `multi_static_jammers/` and `multi_trajectory_jammers/`, so a
+downstream user can tell a cleaned dataset from an uncleaned one.
+
+**Guard.** A run whose cleaning settings differ from the folder's `map_cleaning.json` is
+refused, and so is a cleaned run into a folder that already holds maps without a record
+(the maps made before this record existed are uncleaned). Cleaned and uncleaned maps never
+end up in one dataset; **use a new `--dataset-dir` for a cleaned dataset.**
+
+**Reproducibility.** Sionna's GPU ray accumulation is not bit-reproducible: tracing the
+same position twice with the same seed agrees to within 1e-6 dB in more than 99.9 % of
+cells, but a few cells (0.01-0.3 %, mostly near the jammer) differ by more than 0.5 dB.
+A regenerated dataset therefore matches the original to that level, not bit for bit,
+with or without cleaning. The cleaning itself is deterministic given the raw maps.
+
+`tests/test_map_cleaning.py` (CPU, seconds) checks the steps on synthetic maps and, when
+`datasets_rtfix/` is present, reproduces stored cleaned maps from their stored raw seeds
+bit for bit.
 
 ---
 

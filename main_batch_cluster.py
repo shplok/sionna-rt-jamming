@@ -27,6 +27,11 @@ Only the two simulate_* stages need a GPU. Everything else is NumPy and runs on 
 CPU node. Run scripts/batch_cluster/make_splits.py after both simulate_* stages
 and before either aggregate stage. See README.md for the full sequence.
 
+Radio-map cleaning (off by default): --clean-seeds 42 7 123 traces every single-jammer
+map once per seed and stores the per-cell median with spikes and over-power cells
+repaired (utils/map_cleaning.py, README "Radio-map cleaning"). Each map folder records
+its settings in map_cleaning.json and runs with other settings are refused.
+
 Usage:
     python main_batch_cluster.py --action all --dataset-dir ./datasets/batch_simulation_nyc
 """
@@ -39,6 +44,9 @@ import time
 import glob
 import argparse
 import numpy as np
+
+# Thermal noise floor added before every dB conversion (and used by the map cleaning)
+NOISE_FLOOR_WATTS = 8e-15
 
 # Configure Mitsuba variant before importing Sionna RT
 def setup_mitsuba_variant(preferred="cuda_ad_mono_polarized"):
@@ -62,13 +70,16 @@ def parse_args():
         "--action",
         type=str,
         choices=["all", "generate_static", "simulate_static", "aggregate_static",
-                 "generate", "plot", "simulate_bases", "aggregate"],
+                 "generate", "plot", "simulate_bases", "aggregate",
+                 "init_static_ranges", "merge_static_ranges"],
         default="all",
         help="Pipeline stage. DETECTION branch: generate_static -> simulate_static [GPU] "
              "-> aggregate_static. TRACKING branch: generate -> plot -> simulate_bases [GPU] "
              "-> aggregate. Only the two simulate_* stages need a GPU; everything "
              "else is CPU. 'all' runs the tracking branch only - run the static stages "
-             "explicitly.",
+             "explicitly. To split simulate_static over several GPU jobs: "
+             "init_static_ranges, then simulate_static --static-range per job, then "
+             "merge_static_ranges (both CPU).",
     )
     # Scene and Paths
     parser.add_argument(
@@ -248,8 +259,87 @@ def parse_args():
         choices=["float16", "float32", "float64", "fp16", "fp32", "fp64"],
         help="Floating-point precision for saving aggregated radio maps (default: 'float16'; options: float16, float32, float64).",
     )
+    # Radio-map cleaning (simulate_bases / simulate_static); see utils/map_cleaning.py and
+    # "Radio-map cleaning" in the README. Off by default: maps straight from the solver.
+    parser.add_argument(
+        "--clean-seeds", type=int, nargs="+", default=None, metavar="SEED",
+        help="Trace every single-jammer map once per solver seed and store the cleaned "
+             "map: per-cell median, despiking, cap at the transmit power, non-finite "
+             "repair. At least 3 distinct seeds; the cleaned datasets use 42 7 123. "
+             "Default: off (one trace, solver default seed).",
+    )
+    parser.add_argument(
+        "--raw-maps-dir", type=str, default=None,
+        help="With --clean-seeds: also keep the raw per-seed maps and the per-map cleaning "
+             "counts here (optional; about 3x the size of the cleaned maps).",
+    )
+    parser.add_argument(
+        "--despike-db", type=float, default=20.0,
+        help="Despiking: a cell more than this many dB above all 8 neighbours is a spike "
+             "(default: 20).",
+    )
+    parser.add_argument(
+        "--despike-floor-dbw", type=float, default=-100.0,
+        help="Despiking: only cells above this level are candidates (default: -100 dBW).",
+    )
+    parser.add_argument(
+        "--despike-excl-m", type=float, default=30.0,
+        help="Despiking: cells within this distance of the jammer are never spikes "
+             "(default: 30 m).",
+    )
+    parser.add_argument(
+        "--static-range", type=int, nargs=2, default=None, metavar=("START", "END"),
+        help="simulate_static: only positions [START, END), into per-range part files "
+             "(resumable). Run --action init_static_ranges once before, and "
+             "--action merge_static_ranges once all ranges are done.",
+    )
+    parser.add_argument(
+        "--traj-shard", type=int, nargs=2, default=None, metavar=("I", "N"),
+        help="simulate_bases: only trajectories I, I+N, I+2N, ... (sorted by name), so N "
+             "jobs can run in parallel. No manifest is written; run simulate_bases once "
+             "more without --traj-shard at the end (it skips the finished maps and writes "
+             "radio_maps_manifest.json).",
+    )
     args = parser.parse_args()
+    check_cleaning_args(args)
     return resolve_dataset_paths(args)
+
+
+def check_cleaning_args(args):
+    """Reject combinations of the cleaning / parallel-run flags that would silently misbehave."""
+    if args.clean_seeds is not None:
+        if len(set(args.clean_seeds)) != len(args.clean_seeds):
+            raise SystemExit(f"--clean-seeds has repeated seeds: {args.clean_seeds}")
+        if len(args.clean_seeds) < 3:
+            raise SystemExit("--clean-seeds needs at least 3 seeds: the median of 1 or 2 "
+                             "realisations does not reject a single-seed spike.")
+    if args.raw_maps_dir is not None and args.clean_seeds is None:
+        raise SystemExit("--raw-maps-dir only makes sense with --clean-seeds.")
+    if args.despike_db <= 0 or args.despike_excl_m < 0:
+        raise SystemExit("--despike-db must be > 0 and --despike-excl-m >= 0.")
+    if args.static_range is not None:
+        if args.action != "simulate_static":
+            raise SystemExit("--static-range is for --action simulate_static only.")
+        a, b = args.static_range
+        if not 0 <= a < b:
+            raise SystemExit(f"--static-range needs 0 <= START < END, got {a} {b}.")
+    if args.traj_shard is not None:
+        if args.action != "simulate_bases":
+            raise SystemExit("--traj-shard is for --action simulate_bases only.")
+        i, n = args.traj_shard
+        if not (n >= 1 and 0 <= i < n):
+            raise SystemExit(f"--traj-shard needs N >= 1 and 0 <= I < N, got {i} {n}.")
+
+
+def cleaning_config(args):
+    """The map_cleaning.json settings for this run (NO_CLEANING without --clean-seeds)."""
+    from utils.map_cleaning import NO_CLEANING, make_config
+    if not args.clean_seeds:
+        return dict(NO_CLEANING)
+    return make_config(args.clean_seeds, cap_w=10.0 ** (args.power_dbw / 10.0),
+                       noise_floor_w=NOISE_FLOOR_WATTS, despike_db=args.despike_db,
+                       despike_floor_dbw=args.despike_floor_dbw,
+                       despike_excl_m=args.despike_excl_m)
 
 
 def resolve_dataset_paths(args):
@@ -465,6 +555,34 @@ def run_plot(args, obstacles):
 
 
 # -----------------------------------------------------------------------------
+# One single-jammer map, optionally cleaned (shared by simulate_bases / simulate_static)
+# -----------------------------------------------------------------------------
+def trace_map(rm_solver, scene, args, cell_size, map_center, map_size, tx_xy, cfg):
+    """Ray trace the current scene into one (H, W) watts map.
+
+    Without cleaning (cfg["method"] == "none") this is the plain solver call. With it, the
+    map is traced once per seed in cfg["seeds"] and cleaned (utils/map_cleaning.py).
+    Returns (map float32, raw per-seed maps (S, H, W) float32 or None, masks or None).
+    """
+    kw = dict(max_depth=args.max_depth, samples_per_tx=args.samples_per_tx,
+              cell_size=cell_size, center=map_center, size=[map_size[0], map_size[1]],
+              orientation=[0, 0, 0], diffraction=True, edge_diffraction=True,
+              refraction=True)
+
+    def one(**extra):
+        w = rm_solver(scene, **kw, **extra).rss.numpy()
+        return w[0] if w.ndim == 3 else w
+
+    if cfg["method"] == "none":
+        return one(), None, None
+    from utils.map_cleaning import cell_centres, clean
+    raw = np.stack([one(seed=int(sd)) for sd in cfg["seeds"]]).astype(np.float32)
+    xx, yy = cell_centres(map_center, map_size, cell_size, raw.shape[1:])
+    w, masks = clean(raw, tx_xy, xx, yy, cfg)
+    return w.astype(np.float32), raw, masks
+
+
+# -----------------------------------------------------------------------------
 # Step 3: Base RadioMap Simulation for 54 Single Jammers (GPU)
 # -----------------------------------------------------------------------------
 def run_base_simulations(args, obstacles):
@@ -493,12 +611,24 @@ def run_base_simulations(args, obstacles):
     map_center, map_size = create_scene_objects(scene, map_bounds=map_bounds, z_height=1.5)
     engine = MotionEngine(scene=scene, obstacles=obstacles, bounds=map_bounds)
     rm_solver = RadioMapSolver()
-    NOISE_FLOOR_WATTS = 8e-15
     tx_power_dbm = args.power_dbw + 30.0
 
     traj_files = sorted(glob.glob(os.path.join(args.output_dir, "traj_*.npy")))
     if not traj_files:
         raise FileNotFoundError(f"No single jammer trajectories found in {args.output_dir}")
+    if args.traj_shard is not None:
+        si, sn = args.traj_shard
+        traj_files = traj_files[si::sn]
+        print(f"--traj-shard {si} {sn}: {len(traj_files)} trajectories in this job")
+
+    # Refuses to add maps to a folder made with different cleaning settings
+    from utils.map_cleaning import ensure_record, mask_counts
+    cfg = cleaning_config(args)
+    has_maps = bool(glob.glob(os.path.join(radio_maps_dir, "rm_watts_*.npy")))
+    ensure_record(radio_maps_dir, cfg, has_maps)
+    print(f"Map cleaning: {cfg}")
+    if args.raw_maps_dir:
+        os.makedirs(args.raw_maps_dir, exist_ok=True)
 
     manifest_entries = []
     print(f"Found {len(traj_files)} base trajectories to simulate in {args.output_dir}.")
@@ -530,33 +660,19 @@ def run_base_simulations(args, obstacles):
         tx = Transmitter(name=tx_name, position=path_arr[0], power_dbm=tx_power_dbm)
         scene.add(tx)
 
-        watts_history = []
+        watts_history, raw_history, counts_history = [], [], []
         t_sim_start = time.time()
 
         for step in range(num_steps):
             engine.update_scene_transmitters(step)
             print(f"  Step {step + 1}/{num_steps}...", end="\r", flush=True)
 
-            rm = rm_solver(
-                scene,
-                max_depth=args.max_depth,
-                samples_per_tx=args.samples_per_tx,
-                cell_size=cell_size,
-                center=map_center,
-                size=[map_size[0], map_size[1]],
-                orientation=[0, 0, 0],
-                diffraction=True,
-                edge_diffraction=True,
-                refraction=True,
-            )
-
-            lin_watts = rm.rss.numpy()
-            if len(lin_watts.shape) == 3:
-                watts_frame = lin_watts[0]
-            else:
-                watts_frame = lin_watts
-
+            watts_frame, raw, masks = trace_map(rm_solver, scene, args, cell_size, map_center,
+                                                map_size, np.asarray(path_arr[step])[:2], cfg)
             watts_history.append(watts_frame)
+            if raw is not None:
+                raw_history.append(raw)
+                counts_history.append(mask_counts(masks))
 
         sim_duration = time.time() - t_sim_start
         print(f"\n  Completed {num_steps} steps in {sim_duration:.1f}s ({num_steps / max(sim_duration, 1e-4):.2f} fps).")
@@ -564,6 +680,13 @@ def run_base_simulations(args, obstacles):
         # Convert to arrays (native Watts and dBW with noise floor)
         watts_arr = np.array(watts_history, dtype=np.float32)  # (T, H, W)
         dbw_arr = (10.0 * np.log10(watts_arr + NOISE_FLOOR_WATTS)).astype(np.float32)
+
+        # Raw maps first: the skip check above only looks at the cleaned files
+        if args.raw_maps_dir and raw_history:
+            np.save(os.path.join(args.raw_maps_dir, f"rm_watts_raw_{traj_id}.npy"),
+                    np.stack(raw_history, axis=1))                    # (S, T, H, W)
+            np.save(os.path.join(args.raw_maps_dir, f"clean_counts_{traj_id}.npy"),
+                    np.asarray(counts_history, np.int32))             # (T, 4)
 
         # Save to disk
         np.save(watts_file, watts_arr)
@@ -579,7 +702,12 @@ def run_base_simulations(args, obstacles):
             "max_dbw": float(dbw_arr.max()),
             "noise_floor_watts": NOISE_FLOOR_WATTS,
             "sim_time_seconds": float(round(sim_duration, 2)),
+            "cleaning": cfg,
         }
+        if counts_history:
+            c = np.asarray(counts_history)
+            entry_meta["cleaned_cells_total"] = dict(zip(
+                ("despike", "cap", "nonfinite", "touched"), (int(v) for v in c.sum(0))))
         with open(meta_file, "w", encoding="utf-8") as jf:
             json.dump(entry_meta, jf, indent=2)
 
@@ -589,10 +717,16 @@ def run_base_simulations(args, obstacles):
     for tname in list(scene.transmitters.keys()):
         scene.remove(tname)
 
+    if args.traj_shard is not None:
+        print("\n--traj-shard: manifest not written; run simulate_bases once more without "
+              "--traj-shard to write radio_maps_manifest.json")
+        return manifest_entries
+
     manifest_path = os.path.join(radio_maps_dir, "radio_maps_manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({
             "total_base_radio_maps": len(manifest_entries),
+            "cleaning": cfg,
             "radio_maps": manifest_entries,
         }, f, indent=2)
 
@@ -740,7 +874,10 @@ def run_aggregation_from_splits(args):
         print(f"\n  [{split}] done in {time.time() - t0:.1f}s -> {split_dir}")
         del maps
 
-    print(f"\nWrote {written} scenarios under {args.sim_output_dir}")
+    from utils.map_cleaning import copy_record
+    rec = copy_record(radio_maps_dir, args.sim_output_dir)
+    print(f"\nWrote {written} scenarios under {args.sim_output_dir} (map cleaning: "
+          f"{rec['method']})")
 
 
 # -----------------------------------------------------------------------------
@@ -834,6 +971,17 @@ def run_static_simulation(args):
     # and make random access for the combination step awkward. This is memmap-able.
     watts_path = os.path.join(args.static_dir, "watts.npy")
     done_path = os.path.join(args.static_dir, "watts.progress.json")
+
+    from utils.map_cleaning import ensure_record, mask_counts
+    cfg = cleaning_config(args)
+    print(f"Map cleaning: {cfg}")
+    if args.static_range is not None:
+        # init_static_ranges wrote the record; a range job only checks it
+        ensure_record(args.static_dir, cfg, has_maps=True, create=False)
+        return _run_static_range(args, pos, n_cells, cell, scene, rm_solver, map_center,
+                                 map_size, tx_power_dbm, cfg)
+    ensure_record(args.static_dir, cfg, has_maps=os.path.exists(watts_path))
+
     start = 0
     if os.path.exists(watts_path) and os.path.exists(done_path):
         with open(done_path, "r", encoding="utf-8") as f:
@@ -843,27 +991,33 @@ def run_static_simulation(args):
             print(f"Resuming at position {start}/{n}")
         else:
             print("Existing watts.npy has a different shape; starting over.")
-    if start == 0:
-        arr = np.lib.format.open_memmap(watts_path, mode="w+", dtype=np.float32,
-                                        shape=(n, n_cells, n_cells))
-    else:
-        arr = np.lib.format.open_memmap(watts_path, mode="r+")
+    shape = (n, n_cells, n_cells)
+    arr = _open_array(watts_path, np.float32, shape, resume=start > 0)
+    raws, counts = None, None
+    if args.raw_maps_dir:
+        os.makedirs(args.raw_maps_dir, exist_ok=True)
+        raws = [_open_array(os.path.join(args.raw_maps_dir, f"watts_s{sd}.npy"), np.float32,
+                            shape, resume=start > 0) for sd in cfg["seeds"]]
+        counts = _open_array(os.path.join(args.raw_maps_dir, "clean_counts.npy"), np.int32,
+                             (n, 4), resume=start > 0)
 
     t0 = time.time()
     for i in range(start, n):
         for tname in list(scene.transmitters.keys()):
             scene.remove(tname)
         scene.add(Transmitter(name="J", position=pos[i], power_dbm=tx_power_dbm))
-        rm = rm_solver(scene, max_depth=args.max_depth, samples_per_tx=args.samples_per_tx,
-                       cell_size=cell, center=map_center,
-                       size=[map_size[0], map_size[1]], orientation=[0, 0, 0],
-                       diffraction=True, edge_diffraction=True, refraction=True)
-        w = rm.rss.numpy()
-        arr[i] = w[0] if w.ndim == 3 else w
+        arr[i], raw, masks = trace_map(rm_solver, scene, args, cell, map_center, map_size,
+                                       pos[i][:2], cfg)
+        if raws is not None:
+            for k, r in enumerate(raws):
+                r[i] = raw[k]
+            counts[i] = mask_counts(masks)
         if (i + 1) % 50 == 0 or i == n - 1:
-            arr.flush()
+            for a_ in [arr] + (raws or []) + ([counts] if counts is not None else []):
+                a_.flush()
             with open(done_path, "w", encoding="utf-8") as f:
-                json.dump({"n": n, "n_cells": n_cells, "completed": i + 1}, f)
+                json.dump({"n": n, "n_cells": n_cells, "completed": i + 1,
+                           "cleaning": cfg}, f)
             el = time.time() - t0
             rate = (i + 1 - start) / max(el, 1e-6)
             print(f"  {i+1}/{n}  {rate:.2f}/s  eta {(n-i-1)/max(rate,1e-6)/60:.1f} min",
@@ -872,6 +1026,182 @@ def run_static_simulation(args):
     for tname in list(scene.transmitters.keys()):
         scene.remove(tname)
     print(f"\nDone in {(time.time()-t0)/60:.1f} min -> {watts_path}")
+
+
+def _open_array(path, dtype, shape, resume):
+    """Memmap `path`: reopen it when resuming, otherwise create it with `shape`."""
+    if resume and os.path.exists(path):
+        a = np.lib.format.open_memmap(path, mode="r+")
+        if a.shape != tuple(shape):
+            raise RuntimeError(f"{path} is {a.shape}, expected {tuple(shape)}")
+        return a
+    return np.lib.format.open_memmap(path, mode="w+", dtype=dtype, shape=shape)
+
+
+# Parallel simulate_static: init_static_ranges -> simulate_static --static-range (per job)
+# -> merge_static_ranges. Every range job writes its OWN part files: rows of the shared
+# (N, H, W) file are not page aligned, and memmap writes from several nodes into one file
+# on network storage are not coherent. The merge copies the parts in, in one process.
+def _range_parts_dir(args):
+    return os.path.join(args.static_dir, "range_parts")
+
+
+def _range_targets(args, cfg, n, n_cells):
+    """(part-file pattern, destination array, dtype, shape) for every static output."""
+    shape = (n, n_cells, n_cells)
+    out = [("watts_{}.npy", os.path.join(args.static_dir, "watts.npy"), np.float32, shape)]
+    if args.raw_maps_dir:
+        out += [(f"watts_s{sd}_" + "{}.npy", os.path.join(args.raw_maps_dir, f"watts_s{sd}.npy"),
+                 np.float32, shape) for sd in cfg["seeds"]]
+        out += [("clean_counts_{}.npy", os.path.join(args.raw_maps_dir, "clean_counts.npy"),
+                 np.int32, (n, 4))]
+    return out
+
+
+def run_init_static_ranges(args):
+    """Create the static output arrays and the cleaning record before parallel range jobs.  [CPU]"""
+    from utils.map_cleaning import ensure_record
+    pos = np.load(os.path.join(args.static_dir, "positions.npy"))
+    n = len(pos)
+    n_cells = int(round(2 * args.map_bounds_b / args.cell_size[0]))
+    cfg = cleaning_config(args)
+    targets = _range_targets(args, cfg, n, n_cells)
+    for _, dest, _, _ in targets:
+        if os.path.exists(dest):
+            raise SystemExit(f"{dest} exists; refusing to overwrite it (use a new --dataset-dir "
+                             f"or delete it yourself).")
+    ensure_record(args.static_dir, cfg, has_maps=False)
+    if args.raw_maps_dir:
+        os.makedirs(args.raw_maps_dir, exist_ok=True)
+    for _, dest, dt, shape in targets:
+        np.lib.format.open_memmap(dest, mode="w+", dtype=dt, shape=shape).flush()
+        print(f"created {dest} {shape} {np.dtype(dt).name}")
+    print(f"Map cleaning: {cfg}\nNow run simulate_static --static-range START END per job "
+          f"(same cleaning flags), then --action merge_static_ranges.")
+
+
+def _run_static_range(args, pos, n_cells, cell, scene, rm_solver, map_center, map_size,
+                      tx_power_dbm, cfg):
+    """simulate_static for positions [START, END) into per-range part files, resumable.  [GPU]"""
+    from sionna.rt import Transmitter
+    from utils.map_cleaning import mask_counts
+    a, b_ = args.static_range
+    b_ = min(b_, len(pos))
+    if a >= b_:
+        raise SystemExit(f"--static-range {a} {args.static_range[1]} is past the last "
+                         f"position ({len(pos)}).")
+    tag = f"{a:05d}_{b_:05d}"
+    parts = _range_parts_dir(args)
+    os.makedirs(parts, exist_ok=True)
+    prog_path = os.path.join(parts, f"progress_{tag}.json")
+    start = a
+    if os.path.exists(prog_path):
+        with open(prog_path, "r", encoding="utf-8") as f:
+            pr = json.load(f)
+        if pr.get("cleaning") != cfg:
+            raise SystemExit(f"{prog_path} was made with cleaning {pr.get('cleaning')}, "
+                             f"not {cfg}.")
+        start = int(pr["completed_until"])
+        print(f"Resuming range [{a}, {b_}) at {start}")
+
+    m = b_ - a
+    files = [_open_array(os.path.join(parts, pat.format(tag)), dt, (m,) + shape[1:],
+                         resume=start > a)
+             for pat, _, dt, shape in _range_targets(args, cfg, len(pos), n_cells)]
+    arr = files[0]
+    raws = files[1:-1] if args.raw_maps_dir else []     # one per seed
+    counts = files[-1] if args.raw_maps_dir else None
+
+    t0 = time.time()
+    for i in range(start, b_):
+        for tname in list(scene.transmitters.keys()):
+            scene.remove(tname)
+        scene.add(Transmitter(name="J", position=pos[i], power_dbm=tx_power_dbm))
+        arr[i - a], raw, masks = trace_map(rm_solver, scene, args, cell, map_center,
+                                           map_size, pos[i][:2], cfg)
+        if counts is not None:
+            for k, r in enumerate(raws):
+                r[i - a] = raw[k]
+            counts[i - a] = mask_counts(masks)
+        if (i + 1) % 25 == 0 or i == b_ - 1:
+            for f_ in files:
+                f_.flush()
+            with open(prog_path, "w", encoding="utf-8") as f:
+                json.dump({"range": [a, b_], "completed_until": i + 1, "cleaning": cfg}, f)
+            rate = (i + 1 - start) / max(time.time() - t0, 1e-6)
+            print(f"  {i+1}/{b_}  {rate:.2f}/s  eta {(b_-i-1)/max(rate,1e-6)/60:.1f} min",
+                  flush=True)
+    for tname in list(scene.transmitters.keys()):
+        scene.remove(tname)
+    print(f"\nRange [{a}, {b_}) done in {(time.time()-t0)/60:.1f} min -> {parts}/*_{tag}.npy")
+
+
+def run_merge_static_ranges(args):
+    """Copy the range part files into the arrays made by init_static_ranges.  [CPU]
+
+    Checks that the ranges are complete, do not overlap, cover every position and were
+    all made with the folder's cleaning settings; then writes watts.progress.json and
+    deletes each part file once its copy is verified.
+    """
+    from utils.map_cleaning import ensure_record
+    pos = np.load(os.path.join(args.static_dir, "positions.npy"))
+    n = len(pos)
+    n_cells = int(round(2 * args.map_bounds_b / args.cell_size[0]))
+    cfg = cleaning_config(args)
+    ensure_record(args.static_dir, cfg, has_maps=True, create=False)
+    parts = _range_parts_dir(args)
+    progs = sorted(glob.glob(os.path.join(parts, "progress_*.json")))
+    if not progs:
+        raise SystemExit(f"no range progress files in {parts}")
+    covered = np.zeros(n, bool)
+    ranges = []
+    for pp in progs:
+        with open(pp, "r", encoding="utf-8") as f:
+            pr = json.load(f)
+        a, b_ = pr["range"]
+        if pr["completed_until"] != b_:
+            raise SystemExit(f"{pp}: range [{a}, {b_}) incomplete ({pr['completed_until']})")
+        if pr.get("cleaning") != cfg:
+            raise SystemExit(f"{pp}: made with cleaning {pr.get('cleaning')}, not {cfg}")
+        if covered[a:b_].any():
+            raise SystemExit(f"range [{a}, {b_}) overlaps another range")
+        covered[a:b_] = True
+        ranges.append((a, b_))
+    if not covered.all():
+        raise SystemExit(f"{(~covered).sum()} positions not covered, first "
+                         f"{np.flatnonzero(~covered)[:5].tolist()}")
+
+    done = []
+    for pat, dest, _, _ in _range_targets(args, cfg, n, n_cells):
+        out = np.lib.format.open_memmap(dest, mode="r+")
+        for a, b_ in sorted(ranges):
+            src_path = os.path.join(parts, pat.format(f"{a:05d}_{b_:05d}"))
+            out[a:b_] = np.load(src_path, mmap_mode="r")
+            done.append((src_path, dest, a, b_))
+        out.flush()
+        del out
+        print(f"merged {len(ranges)} ranges -> {dest}")
+    with open(os.path.join(args.static_dir, "watts.progress.json"), "w", encoding="utf-8") as f:
+        json.dump({"n": n, "n_cells": n_cells, "completed": n, "cleaning": cfg}, f)
+
+    # Re-read every copied block from disk before deleting its part file. Each memmap is
+    # released before the deletes: on NFS a deleted file that is still mapped stays behind
+    # as a .nfsXXXX placeholder until the process exits.
+    for src_path, dest, a, b_ in done:
+        d_, s_ = np.load(dest, mmap_mode="r"), np.load(src_path, mmap_mode="r")
+        same = np.array_equal(d_[a:b_], s_)
+        del d_, s_
+        if not same:
+            raise SystemExit(f"verification failed for {src_path} -> {dest}; parts kept")
+    for src_path, _, _, _ in done:
+        os.remove(src_path)
+    for pp in progs:
+        os.remove(pp)
+    try:
+        os.rmdir(parts)
+    except OSError:      # NFS placeholders of files still open elsewhere; harmless
+        print(f"note: {parts} is not empty yet (NFS placeholders); remove it later")
+    print(f"verified and removed the part files in {parts}")
 
 
 def run_static_aggregation(args):
@@ -970,7 +1300,10 @@ def run_static_aggregation(args):
         print(f"\n  {split}: {n} samples -> {out_dir} "
               f"({os.path.getsize(os.path.join(out_dir,'rss.npy'))/1e9:.1f} GB)")
 
-    print(f"\nDetector samples written under {args.multi_static_dir}")
+    from utils.map_cleaning import copy_record
+    rec = copy_record(args.static_dir, args.multi_static_dir)
+    print(f"\nDetector samples written under {args.multi_static_dir} (map cleaning: "
+          f"{rec['method']})")
 
 
 # -----------------------------------------------------------------------------
@@ -991,7 +1324,7 @@ def main():
     # static placement, but not for the two pure-NumPy combination stages.
     obstacles, engine = None, None
     if args.action not in ("aggregate", "aggregate_static", "simulate_static",
-                           "generate_static"):
+                           "generate_static", "init_static_ranges", "merge_static_ranges"):
         t0 = time.time()
         from utils.scene_objects import gather_bboxes
         from core.engine import MotionEngine
@@ -1009,8 +1342,14 @@ def main():
     if args.action == "generate_static":
         run_static_generation(args)
 
+    if args.action == "init_static_ranges":
+        run_init_static_ranges(args)
+
     if args.action == "simulate_static":
         run_static_simulation(args)
+
+    if args.action == "merge_static_ranges":
+        run_merge_static_ranges(args)
 
     if args.action == "aggregate_static":
         run_static_aggregation(args)
