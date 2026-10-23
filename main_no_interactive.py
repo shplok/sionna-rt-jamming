@@ -726,7 +726,7 @@ def run_aggregation(args, obstacles):
 
             create_jammer_animation(
                 rss_list=agg_dbw.astype(np.float32),
-                engine=engine,
+                paths_dict=engine._jammer_paths,
                 buildings=obstacles,
                 map_size=map_size,
                 map_center=map_center,
