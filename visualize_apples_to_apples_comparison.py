@@ -165,12 +165,14 @@ def main():
 
     out_artifact = os.path.join(artifact_dir, "radio_maps_apples_to_apples_despiked.png")
     out_scratch = os.path.join(args.test_dir, "radio_maps_apples_to_apples_despiked.png")
+    out_cwd = os.path.join(os.getcwd(), "radio_maps_apples_to_apples_despiked.png")
 
     fig.savefig(out_artifact, dpi=150, bbox_inches="tight")
     fig.savefig(out_scratch, dpi=150, bbox_inches="tight")
+    fig.savefig(out_cwd, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    print(f"\nMulti-jammer comparison successfully saved to:\n  {out_artifact}\n  {out_scratch}")
+    print(f"\nMulti-jammer comparison successfully saved to:\n  {out_cwd}\n  {out_scratch}\n  {out_artifact}")
 
 if __name__ == "__main__":
     main()
