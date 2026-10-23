@@ -6,8 +6,20 @@ __pycache__/
 .osm
 .xml
 
-# data
-datasets/
+# data -- generated datasets are never versioned, but each dataset's README IS: it
+# is the design document for the pipeline. A trailing-slash `datasets/` stops git
+# descending into the directory at all, so the negations need `datasets/*`, and the
+# contents then have to be re-ignored before un-ignoring just the README.
+datasets/*
+!datasets/*/
+datasets/*/*
+!datasets/*/README.md
+# ... and the preview figures the README embeds. Same reasoning as the README
+# itself: they are part of the design document, and without them the README
+# renders with broken images on GitHub. Only the figures referenced by the
+# README are committed, not the whole previews/ directory.
+!datasets/*/previews/
+!datasets/*/previews/*.png
 cache/
 data/*
 !data/clean_xml.py
@@ -18,3 +30,10 @@ data/*
 **/.DS_Store
 
 logs/
+# editor/venv cruft
+.venv/
+venv/
+SESSION_*.md
+
+# NFS keeps deleted-but-open files as .nfsXXXX until the last handle closes
+.nfs*

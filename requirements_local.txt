@@ -1,0 +1,30 @@
+# LOCAL environment - laptop / CPU-only (macOS, Windows, Linux without a GPU).
+#
+#   conda create -n sionna python=3.11 && conda activate sionna
+#   pip install -r requirements_local.txt
+#   export MITSUBA_VARIANT=llvm_ad_mono_polarized
+#
+# Versions match requirements_cluster.txt so results are comparable across machines.
+# What is deliberately absent: the `--extra-index-url .../cu124` line, the
+# `torch==2.6.0+cu124` / `torchvision` pins, and every `nvidia-*` wheel - those are
+# linux_x86_64 + CUDA only. If sionna-rt pulls torch in as a dependency, pip will
+# resolve the ordinary CPU build from PyPI, which is what you want here.
+#
+# This is a hand-maintained list of what the repo actually imports, not a freeze.
+# Transitive dependencies (drjit's own, matplotlib's, trimesh's) are left to pip.
+
+# --- ray tracing core ---
+sionna-rt==2.1.0
+mitsuba==3.9.1
+drjit==1.5.0
+
+# --- numerics and geometry ---
+numpy==2.4.6
+scipy==1.17.1
+trimesh==5.1.0
+
+# --- plotting (also used for the headless trajectory maps and GIFs) ---
+matplotlib==3.11.1
+
+# Note: the interactive planner (main.py) uses tkinter, which ships with Python.
+# On macOS install it via python.org or `conda install tk` if `import tkinter` fails.
