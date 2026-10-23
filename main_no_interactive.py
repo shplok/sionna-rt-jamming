@@ -212,6 +212,38 @@ def parse_args():
         choices=["float16", "float32", "float64", "fp16", "fp32", "fp64"],
         help="Floating-point precision for saving aggregated radio maps (default: 'float16'; options: float16, float32, float64).",
     )
+    # Radio-map cleaning (despiking) options
+    parser.add_argument(
+        "--clean-seeds",
+        type=int,
+        nargs="+",
+        default=[42, 7, 123],
+        metavar="SEED",
+        help="Solver seeds for despiking (default: 42 7 123). At least 3 distinct seeds.",
+    )
+    parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="Disable radio-map cleaning (run single-seed raw simulation without despiking).",
+    )
+    parser.add_argument(
+        "--despike-db",
+        type=float,
+        default=20.0,
+        help="Despiking threshold in dB above all 8 neighbours (default: 20.0).",
+    )
+    parser.add_argument(
+        "--despike-floor-dbw",
+        type=float,
+        default=-100.0,
+        help="Minimum power floor in dBW for despiking candidates (default: -100.0 dBW).",
+    )
+    parser.add_argument(
+        "--despike-excl-m",
+        type=float,
+        default=30.0,
+        help="Distance in meters around the transmitter excluded from despiking (default: 30.0m).",
+    )
     return parser.parse_args()
 
 
@@ -448,6 +480,49 @@ def run_plot(args, obstacles):
     print(f"Trajectory map successfully saved to: {output_img}")
 
 
+def cleaning_config(args):
+    """The map_cleaning.json settings for this run (NO_CLEANING with --no-clean)."""
+    from utils.map_cleaning import NO_CLEANING, make_config
+    if getattr(args, "no_clean", False) or not getattr(args, "clean_seeds", None):
+        return dict(NO_CLEANING)
+    return make_config(
+        args.clean_seeds,
+        cap_w=10.0 ** (args.power_dbw / 10.0),
+        noise_floor_w=8e-15,
+        despike_db=args.despike_db,
+        despike_floor_dbw=args.despike_floor_dbw,
+        despike_excl_m=args.despike_excl_m,
+    )
+
+
+def trace_map(rm_solver, scene, args, cell_size, map_center, map_size, tx_xy, cfg):
+    """Ray trace the current scene into one (H, W) watts map, with optional despiking."""
+    kw = dict(
+        max_depth=args.max_depth,
+        samples_per_tx=args.samples_per_tx,
+        cell_size=cell_size,
+        center=map_center,
+        size=[map_size[0], map_size[1]],
+        orientation=[0, 0, 0],
+        diffraction=True,
+        edge_diffraction=True,
+        refraction=True,
+    )
+
+    def one(**extra):
+        w = rm_solver(scene, **kw, **extra).rss.numpy()
+        return w[0] if w.ndim == 3 else w
+
+    if cfg["method"] == "none":
+        return one(), None, None
+
+    from utils.map_cleaning import cell_centres, clean
+    raw = np.stack([one(seed=int(sd)) for sd in cfg["seeds"]]).astype(np.float32)
+    xx, yy = cell_centres(map_center, map_size, cell_size, raw.shape[1:])
+    w, masks = clean(raw, tx_xy, xx, yy, cfg)
+    return w.astype(np.float32), raw, masks
+
+
 # -----------------------------------------------------------------------------
 # Step 3: Base RadioMap Simulation for 54 Single Jammers (GPU)
 # -----------------------------------------------------------------------------
@@ -466,6 +541,12 @@ def run_base_simulations(args, obstacles):
 
     radio_maps_dir = os.path.join(args.output_dir, "radio_maps")
     os.makedirs(radio_maps_dir, exist_ok=True)
+
+    from utils.map_cleaning import ensure_record, mask_counts
+    cfg = cleaning_config(args)
+    has_maps = bool(glob.glob(os.path.join(radio_maps_dir, "rm_watts_*.npy")))
+    ensure_record(radio_maps_dir, cfg, has_maps)
+    print(f"Map cleaning: {cfg}")
 
     # 1. Load scene
     scene = load_scene(args.scene_path)
@@ -514,33 +595,20 @@ def run_base_simulations(args, obstacles):
         tx = Transmitter(name=tx_name, position=path_arr[0], power_dbm=tx_power_dbm)
         scene.add(tx)
 
-        watts_history = []
+        watts_history, counts_history = [], []
         t_sim_start = time.time()
 
         for step in range(num_steps):
             engine.update_scene_transmitters(step)
             print(f"  Step {step + 1}/{num_steps}...", end="\r", flush=True)
 
-            rm = rm_solver(
-                scene,
-                max_depth=args.max_depth,
-                samples_per_tx=args.samples_per_tx,
-                cell_size=cell_size,
-                center=map_center,
-                size=[map_size[0], map_size[1]],
-                orientation=[0, 0, 0],
-                diffraction=True,
-                edge_diffraction=True,
-                refraction=True,
+            watts_frame, raw, masks = trace_map(
+                rm_solver, scene, args, cell_size, map_center, map_size,
+                np.asarray(path_arr[step])[:2], cfg
             )
-
-            lin_watts = rm.rss.numpy()
-            if len(lin_watts.shape) == 3:
-                watts_frame = lin_watts[0]
-            else:
-                watts_frame = lin_watts
-
             watts_history.append(watts_frame)
+            if masks is not None:
+                counts_history.append(mask_counts(masks))
 
         sim_duration = time.time() - t_sim_start
         print(f"\n  Completed {num_steps} steps in {sim_duration:.1f}s ({num_steps / max(sim_duration, 1e-4):.2f} fps).")
@@ -563,7 +631,12 @@ def run_base_simulations(args, obstacles):
             "max_dbw": float(dbw_arr.max()),
             "noise_floor_watts": NOISE_FLOOR_WATTS,
             "sim_time_seconds": float(round(sim_duration, 2)),
+            "cleaning": cfg,
         }
+        if counts_history:
+            c = np.asarray(counts_history)
+            entry_meta["cleaned_cells_total"] = dict(zip(
+                ("despike", "cap", "nonfinite", "touched"), (int(v) for v in c.sum(0))))
         with open(meta_file, "w", encoding="utf-8") as jf:
             json.dump(entry_meta, jf, indent=2)
 
