@@ -38,6 +38,11 @@ def setup_mitsuba_variant(preferred="cuda_ad_mono_polarized"):
 # CLI Arguments
 # -----------------------------------------------------------------------------
 def parse_args():
+    import paths_config
+    scene_defs = paths_config.get_scene_defaults()
+    default_traj_dir = paths_config.get_trajectories_dir("curved")
+    default_sim_dir = paths_config.get_sim_output_dir()
+
     parser = argparse.ArgumentParser(
         description="Unified non-interactive pipeline for trajectory generation and Sionna RT simulation."
     )
@@ -52,26 +57,26 @@ def parse_args():
     parser.add_argument(
         "--scene-path",
         type=str,
-        default="./data/NYC3KM_585751_4512036/simple_OSM_scene.xml",
-        help="Path to Mitsuba XML scene file.",
+        default=scene_defs["scene_path"],
+        help=f"Path to Mitsuba XML scene file (default: {scene_defs['scene_path']}).",
     )
     parser.add_argument(
         "--mesh-dir",
         type=str,
-        default="./data/NYC3KM_585751_4512036/mesh",
-        help="Path to building mesh directory.",
+        default=scene_defs["mesh_dir"],
+        help=f"Path to building mesh directory (default: {scene_defs['mesh_dir']}).",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./datasets/nyc_single_jammers",
-        help="Folder containing generated single jammer trajectories (default: ./datasets/nyc_single_jammers).",
+        default=default_traj_dir,
+        help=f"Folder containing generated single jammer trajectories (default: {default_traj_dir}).",
     )
     parser.add_argument(
         "--sim-output-dir",
         type=str,
-        default="./datasets/simulation_results_nyc",
-        help="Folder to store radio map simulation arrays and summary GIF.",
+        default=default_sim_dir,
+        help=f"Folder to store radio map simulation arrays and summary GIF (default: {default_sim_dir}).",
     )
     # Multi-Jammer Combination Parameters
     parser.add_argument(

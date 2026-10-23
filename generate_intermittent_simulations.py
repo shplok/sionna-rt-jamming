@@ -31,6 +31,14 @@ import time
 import argparse
 from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
+import paths_config
+
+DEFAULT_SIM_DIR = paths_config.get_sim_output_dir()
+DEFAULT_INTERMITTENT_DIR = paths_config.get_intermittent_dir()
+DEFAULT_CURVED_TRAJ_DIR = paths_config.get_trajectories_dir("curved")
+DEFAULT_LONG_TRAJ_DIR = paths_config.get_trajectories_dir("long")
+DEFAULT_INTERMITTENT_LONG_DIR = paths_config.get_intermittent_dir("long")
+DEFAULT_MESH_DIR = paths_config.get_scene_defaults()["mesh_dir"]
 
 NOISE_FLOOR_WATTS_DEFAULT = 8e-15
 
@@ -503,9 +511,9 @@ def plot_intermittent_timeline(summary_json_path: str, output_image_path: str):
 
 
 def run_long_3jammers_preset(
-    traj_dir: str = "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_long_jammers",
-    output_dir: str = "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc_intermittent_long",
-    mesh_dir: str = "./data/NYC3KM_585751_4512036/mesh",
+    traj_dir: str = DEFAULT_LONG_TRAJ_DIR,
+    output_dir: str = DEFAULT_INTERMITTENT_LONG_DIR,
+    mesh_dir: str = DEFAULT_MESH_DIR,
     fps: int = 6,
     generate_gif: bool = True,
     generate_snapshot: bool = True,
@@ -679,14 +687,14 @@ def parse_args():
     parser.add_argument(
         "--input-sim-dir",
         type=str,
-        default="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc",
-        help="Input simulation directory containing generated combinations (default: scratch simulation_results_nyc)",
+        default=DEFAULT_SIM_DIR,
+        help=f"Input simulation directory containing generated combinations (default: {DEFAULT_SIM_DIR})",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc_intermittent",
-        help="Clone output directory for intermittent simulations",
+        default=DEFAULT_INTERMITTENT_DIR,
+        help=f"Clone output directory for intermittent simulations (default: {DEFAULT_INTERMITTENT_DIR})",
     )
     parser.add_argument(
         "--radio-maps-dir",
@@ -758,14 +766,14 @@ def parse_args():
     parser.add_argument(
         "--trajectories-dir",
         type=str,
-        default="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_curved_jammers",
-        help="Directory with single jammer trajectory coordinates .npy.",
+        default=DEFAULT_CURVED_TRAJ_DIR,
+        help=f"Directory with single jammer trajectory coordinates .npy (default: {DEFAULT_CURVED_TRAJ_DIR}).",
     )
     parser.add_argument(
         "--mesh-dir",
         type=str,
-        default="./data/NYC3KM_585751_4512036/mesh",
-        help="Path to mesh directory for building footprints in visualization.",
+        default=DEFAULT_MESH_DIR,
+        help=f"Path to mesh directory for building footprints in visualization (default: {DEFAULT_MESH_DIR}).",
     )
     parser.add_argument(
         "--fps",
@@ -793,8 +801,8 @@ def main():
 
     # Preset shortcut
     if args.preset == "long_3jammers":
-        traj_dir = args.trajectories_dir if args.trajectories_dir != "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_curved_jammers" else "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_long_jammers"
-        out_dir = args.output_dir if args.output_dir != "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc_intermittent" else "/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc_intermittent_long"
+        traj_dir = args.trajectories_dir if args.trajectories_dir != DEFAULT_CURVED_TRAJ_DIR else DEFAULT_LONG_TRAJ_DIR
+        out_dir = args.output_dir if args.output_dir != DEFAULT_INTERMITTENT_DIR else DEFAULT_INTERMITTENT_LONG_DIR
         run_long_3jammers_preset(
             traj_dir=traj_dir,
             output_dir=out_dir,

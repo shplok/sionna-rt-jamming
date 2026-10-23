@@ -25,9 +25,10 @@ MAX_JAMMERS=5               # Maximum number of jammers per combination (request
 SKIP_GIF="--skip-gif"       # GIF animation: "" (generate GIFs) | "--skip-gif" (skip GIFs to save time and disk space)
 PRECISION="float16"         # Precision for aggregated maps: float16 | float32 | float64
 
-# Storage location on high-capacity scratch storage (/pomplun/scratch01/cs_research/l.gonzalezgudino001/)
-OUTPUT_DIR="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_curved_jammers"
-SIM_OUTPUT_DIR="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc"
+# Storage locations (auto-detected by paths_config.py or overridden by env vars)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="${OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_trajectories_dir('$MODE'))" 2>/dev/null || echo "$SCRIPT_DIR/datasets/nyc_${MODE}_jammers")}"
+SIM_OUTPUT_DIR="${SIM_OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_sim_output_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/simulation_results_nyc")}"
 
 set -e  # Stop script if any step fails
 
