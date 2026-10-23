@@ -17,12 +17,17 @@
 # ==============================================================================
 # Experiment Parameters (Easily modify here)
 # ==============================================================================
-ACTION="all"                # all | generate (trajectories only) | plot | simulate
-NUM_COMBINATIONS=10         # Number of multi-jammer combinations to aggregate (10)
+ACTION="all"                # all | generate (trajectories only) | plot | simulate_bases | aggregate | simulate
+MODE="curved"               # curved (new mode) | straight (original mode)
+NUM_COMBINATIONS=100        # Number of multi-jammer combinations to aggregate (100 requested)
 MIN_JAMMERS=2               # Minimum number of jammers per combination
-MAX_JAMMERS=10              # Maximum number of jammers per combination
-SKIP_GIF=""                 # GIF animation: "" (generate GIFs) | "--skip-gif" (skip GIFs to save time and disk space)
+MAX_JAMMERS=5               # Maximum number of jammers per combination (requested max: 5)
+SKIP_GIF="--skip-gif"       # GIF animation: "" (generate GIFs) | "--skip-gif" (skip GIFs to save time and disk space)
 PRECISION="float16"         # Precision for aggregated maps: float16 | float32 | float64
+
+# Storage location on high-capacity scratch storage (/pomplun/scratch01/cs_research/l.gonzalezgudino001/)
+OUTPUT_DIR="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/nyc_curved_jammers"
+SIM_OUTPUT_DIR="/pomplun/scratch01/cs_research/l.gonzalezgudino001/sionna_rt_jamming/simulation_results_nyc"
 
 set -e  # Stop script if any step fails
 
@@ -30,11 +35,15 @@ echo "=================================================================="
 echo "Sionna RT Jamming - Unified Pipeline"
 echo "Host: $(hostname)"
 echo "Start time: $(date)"
-echo "Action: $ACTION | Combos: $NUM_COMBINATIONS (Jammers: $MIN_JAMMERS-$MAX_JAMMERS)"
+echo "Action: $ACTION | Mode: $MODE | Combos: $NUM_COMBINATIONS (Jammers: $MIN_JAMMERS-$MAX_JAMMERS)"
+echo "Trajectories output dir: $OUTPUT_DIR"
+echo "Simulation output dir:   $SIM_OUTPUT_DIR"
 echo "=================================================================="
 
-# Create directory for SLURM logs
+# Create directory for SLURM logs and output directories
 mkdir -p logs
+mkdir -p "$OUTPUT_DIR"
+mkdir -p "$SIM_OUTPUT_DIR"
 
 # 0. Load server/environment settings (editable in server_env.sh or server_config.json)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,30 +54,35 @@ fi
 source ~/.bashrc
 conda activate "${CONDA_ENV_NAME:-sionna}" 2>/dev/null || [ -z "$CONDA_BIN_DIR" ] || export PATH="${CONDA_BIN_DIR}:$PATH"
 
+PYTHON_EXEC="python"
+if ! command -v python &> /dev/null; then
+    PYTHON_EXEC="${CONDA_BIN_DIR}/python"
+fi
+
 export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 
 echo -e "\n[0/3] Verifying GPU environment..."
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
-python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print('Active Mitsuba variant:', mi.variant())"
+"$PYTHON_EXEC" -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print('Active Mitsuba variant:', mi.variant())"
 
 # ------------------------------------------------------------------------------
 # Run full pipeline: Generation + 2D Visualization + GPU Simulation
 # ------------------------------------------------------------------------------
 echo -e "\n=================================================================="
-echo "Running main_no_interactive.py with action=$ACTION..."
+echo "Running main_no_interactive.py with action=$ACTION, mode=$MODE..."
 echo "=================================================================="
-python main_no_interactive.py \
+"$PYTHON_EXEC" main_no_interactive.py \
     --action "$ACTION" \
+    --mode "$MODE" \
     --mesh-dir ./data/NYC3KM_585751_4512036/mesh \
     --scene-path ./data/NYC3KM_585751_4512036/simple_OSM_scene.xml \
-    --output-dir ./datasets/nyc_single_jammers \
-    --sim-output-dir ./datasets/simulation_results_nyc \
+    --output-dir "$OUTPUT_DIR" \
+    --sim-output-dir "$SIM_OUTPUT_DIR" \
     --durations 30 60 90 \
     --velocities 3 9 15 \
     --count-per-combo 6 \
     --max-overlap-ratio 0.75 \
     --proximity-threshold 20.0 \
-    --mode straight \
     --map-bounds-b 1500 \
     --cell-size 8 8 \
     --samples-per-tx 10000000 \
@@ -81,6 +95,7 @@ python main_no_interactive.py \
 
 echo -e "\n=================================================================="
 echo "Full pipeline completed successfully at: $(date)"
-echo "Trajectory results in: ./datasets/nyc_single_jammers"
-echo "Simulation results in:   ./datasets/simulation_results_nyc"
+echo "Trajectory results in: $OUTPUT_DIR"
+echo "Simulation results in:   $SIM_OUTPUT_DIR"
 echo "=================================================================="
+

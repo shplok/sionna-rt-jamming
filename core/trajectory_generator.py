@@ -12,11 +12,17 @@ Provides:
 import os
 import json
 import math
+import pickle
+import heapq
+import collections
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple, Union
 
 from core.engine import MotionEngine
 from core.utils import check_line_of_sight, calculate_smooth_path
+from scipy.interpolate import CubicSpline
+from scipy.spatial import KDTree
+from scipy.spatial.distance import cdist
 
 
 class TrajectorySpec:
@@ -63,8 +69,8 @@ def compute_trajectory_overlap(
     proximity_threshold: float = 20.0,
 ) -> float:
     """
-    Computes the mutual overlap ratio between two trajectories.
-    Two segments are considered overlapping at points where they are within
+    Computes the mutual overlap ratio between two trajectories (straight or curved).
+    Two trajectories are considered overlapping at points where they are within
     `proximity_threshold` meters of each other (e.g. traveling along the same street canyon).
 
     The overlap ratio is defined as:
@@ -73,32 +79,221 @@ def compute_trajectory_overlap(
     Returns:
         float in [0.0, 1.0]: 0.0 means completely separate, 1.0 means fully overlapping.
     """
-    p1_a, p1_b = traj1[0, :2], traj1[-1, :2]
-    p2_a, p2_b = traj2[0, :2], traj2[-1, :2]
+    pts1 = traj1[:, :2]
+    pts2 = traj2[:, :2]
 
-    def _point_to_segment_dists(pts_2d: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        ab = b - a
-        ab_len2 = float(np.dot(ab, ab))
-        if ab_len2 < 1e-6:
-            return np.linalg.norm(pts_2d - a, axis=1)
-        ap = pts_2d - a
-        t = np.clip(np.sum(ap * ab, axis=1) / ab_len2, 0.0, 1.0)
-        proj = a + t[:, np.newaxis] * ab
-        return np.linalg.norm(pts_2d - proj, axis=1)
+    # If inputs are just 2 endpoints (e.g. candidate segment [p0, p_end]), sample densely
+    if len(pts1) < 20:
+        n_samples1 = max(len(pts1), 50)
+        diffs1 = np.diff(pts1, axis=0)
+        dists1 = np.linalg.norm(diffs1, axis=1)
+        cum1 = np.insert(np.cumsum(dists1), 0, 0.0)
+        if cum1[-1] > 1e-4:
+            s_eval1 = np.linspace(0, cum1[-1], n_samples1)
+            pts1 = np.column_stack((
+                np.interp(s_eval1, cum1, pts1[:, 0]),
+                np.interp(s_eval1, cum1, pts1[:, 1])
+            ))
 
-    n_samples1 = max(len(traj1), 50)
-    pts1 = np.linspace(traj1[0], traj1[-1], n_samples1)
+    if len(pts2) < 20:
+        n_samples2 = max(len(pts2), 50)
+        diffs2 = np.diff(pts2, axis=0)
+        dists2 = np.linalg.norm(diffs2, axis=1)
+        cum2 = np.insert(np.cumsum(dists2), 0, 0.0)
+        if cum2[-1] > 1e-4:
+            s_eval2 = np.linspace(0, cum2[-1], n_samples2)
+            pts2 = np.column_stack((
+                np.interp(s_eval2, cum2, pts2[:, 0]),
+                np.interp(s_eval2, cum2, pts2[:, 1])
+            ))
 
-    n_samples2 = max(len(traj2), 50)
-    pts2 = np.linspace(traj2[0], traj2[-1], n_samples2)
+    dists_matrix = cdist(pts1, pts2)
+    d1 = np.min(dists_matrix, axis=1)
+    d2 = np.min(dists_matrix, axis=0)
 
-    d1 = _point_to_segment_dists(pts1[:, :2], p2_a, p2_b)
     ratio1 = float(np.mean(d1 <= proximity_threshold))
-
-    d2 = _point_to_segment_dists(pts2[:, :2], p1_a, p1_b)
     ratio2 = float(np.mean(d2 <= proximity_threshold))
 
     return max(ratio1, ratio2)
+
+
+def simplify_collinear(points: np.ndarray, angle_tol_deg: float = 15.0) -> np.ndarray:
+    """Removes intermediate collinear points along straight roads while preserving intersection turns."""
+    if len(points) <= 2:
+        return points
+    simplified = [points[0]]
+    for i in range(1, len(points) - 1):
+        v1 = points[i] - simplified[-1]
+        v2 = points[i + 1] - points[i]
+        d1 = np.linalg.norm(v1)
+        d2 = np.linalg.norm(v2)
+        if d1 < 1e-3 or d2 < 1e-3:
+            continue
+        u1 = v1 / d1
+        u2 = v2 / d2
+        cos_ang = np.clip(np.dot(u1, u2), -1.0, 1.0)
+        ang = math.degrees(math.acos(cos_ang))
+        if ang > angle_tol_deg:
+            simplified.append(points[i])
+    simplified.append(points[-1])
+    return np.array(simplified)
+
+
+def round_corners(points: np.ndarray, corner_radius: float = 10.0, num_arc_pts: int = 10) -> np.ndarray:
+    """
+    Rounds sharp turns in a piecewise-linear path using quadratic Bezier fillets.
+    This guarantees that the trajectory smoothly turns around corners without
+    overshooting into buildings (avoiding cubic spline overshoot).
+    """
+    if len(points) <= 2:
+        return points
+
+    refined = [points[0]]
+    for i in range(1, len(points) - 1):
+        p_prev = points[i - 1]
+        p_curr = points[i]
+        p_next = points[i + 1]
+
+        v1 = p_prev - p_curr
+        v2 = p_next - p_curr
+        d1 = np.linalg.norm(v1)
+        d2 = np.linalg.norm(v2)
+
+        if d1 < 1e-3 or d2 < 1e-3:
+            continue
+
+        u1 = v1 / d1
+        u2 = v2 / d2
+
+        cos_angle = np.clip(np.dot(u1, u2), -1.0, 1.0)
+        if cos_angle < -0.96:
+            refined.append(p_curr)
+            continue
+
+        r = min(corner_radius, d1 * 0.4, d2 * 0.4)
+        p_start = p_curr + r * u1
+        p_end = p_curr + r * u2
+
+        ts = np.linspace(0.0, 1.0, num_arc_pts)
+        for t in ts:
+            b_pt = ((1.0 - t) ** 2) * p_start + 2.0 * (1.0 - t) * t * p_curr + (t ** 2) * p_end
+            refined.append(b_pt)
+
+    refined.append(points[-1])
+    return np.array(refined)
+
+
+def build_city_prm(
+    engine: MotionEngine,
+    bounds: Dict[str, Any],
+    num_samples: int = 2500,
+    radius: float = 180.0,
+    min_dist: float = 22.0,
+    cache_path: Optional[str] = None,
+) -> Tuple[np.ndarray, Dict[int, List[int]]]:
+    """
+    Constructs a generic Probabilistic Roadmap (PRM) of collision-free street network
+    for ANY city layout (Manhattan, European curved, synthetic, etc.).
+    """
+    if cache_path and os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            data = pickle.load(f)
+        return np.array(data["nodes"]), data["adjacency"]
+
+    x_min, x_max = bounds['x']
+    y_min, y_max = bounds['y']
+    z_h = bounds['z'][0]
+
+    obs_tree = None
+    if engine._obs_min is not None and len(engine._obs_min) > 0:
+        obs_centers = 0.5 * (engine._obs_min[:, :2] + engine._obs_max[:, :2])
+        obs_tree = KDTree(obs_centers)
+
+    nodes = []
+    attempts = 0
+    while len(nodes) < num_samples and attempts < 150:
+        batch = 600
+        xs = np.random.uniform(x_min, x_max, batch)
+        ys = np.random.uniform(y_min, y_max, batch)
+        zs = np.full(batch, z_h)
+        cand = np.column_stack((xs, ys, zs))
+
+        valid = []
+        for p in cand:
+            if engine.is_position_valid(p):
+                if obs_tree is not None:
+                    d_bldg, _ = obs_tree.query(p[:2])
+                    if d_bldg <= 80.0:
+                        valid.append(p)
+                else:
+                    valid.append(p)
+
+        if not nodes and valid:
+            nodes.append(valid.pop(0))
+
+        if nodes and valid:
+            tree = KDTree(nodes)
+            for p in valid:
+                if len(nodes) >= num_samples:
+                    break
+                d, _ = tree.query(p)
+                if d >= min_dist:
+                    nodes.append(p)
+        attempts += 1
+
+    tree = KDTree(nodes)
+    k_neighbors = 16
+    dists, indices = tree.query(nodes, k=k_neighbors + 1, distance_upper_bound=radius)
+
+    adjacency = collections.defaultdict(list)
+    for i, (nbr_dists, nbr_indices) in enumerate(zip(dists, indices)):
+        p1 = nodes[i]
+        for d, j in zip(nbr_dists, nbr_indices):
+            if np.isinf(d) or i >= j or j >= len(nodes):
+                continue
+            p2 = nodes[j]
+            if check_line_of_sight(engine, p1, p2, step_size=4.0):
+                adjacency[i].append(j)
+                adjacency[j].append(i)
+
+    visited = set()
+    components = []
+    for i in range(len(nodes)):
+        if i not in visited:
+            comp = []
+            q = [i]
+            visited.add(i)
+            for u in q:
+                comp.append(u)
+                for v in adjacency[u]:
+                    if v not in visited:
+                        visited.add(v)
+                        q.append(v)
+            components.append(comp)
+
+    components.sort(key=len, reverse=True)
+    if components:
+        main_nodes_indices = sorted(components[0])
+        idx_map = {old_i: new_i for new_i, old_i in enumerate(main_nodes_indices)}
+        filt_nodes = [nodes[i] for i in main_nodes_indices]
+        filt_adj = collections.defaultdict(list)
+        for old_i in main_nodes_indices:
+            new_i = idx_map[old_i]
+            for nbr in adjacency[old_i]:
+                if nbr in idx_map:
+                    filt_adj[new_i].append(idx_map[nbr])
+        nodes_arr = np.array(filt_nodes)
+        adjacency = filt_adj
+    else:
+        nodes_arr = np.array(nodes)
+
+    if cache_path:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "wb") as f:
+            pickle.dump({"nodes": nodes_arr, "adjacency": adjacency}, f)
+
+    return nodes_arr, adjacency
+
 
 
 class TrajectoryGenerator:
@@ -109,6 +304,8 @@ class TrajectoryGenerator:
 
     def __init__(self, engine: Optional[MotionEngine] = None):
         self.engine = engine
+        self._prm_nodes: Optional[np.ndarray] = None
+        self._prm_adjacency: Optional[Dict[int, List[int]]] = None
 
     # =========================================================================
     # 1. Straight Line Generation (No turns, zero acceleration)
@@ -411,6 +608,225 @@ class TrajectoryGenerator:
             )
 
         return found_corridors
+
+    def get_clear_distance(
+        self,
+        p_start: np.ndarray,
+        heading_deg: float,
+        max_dist: float = 1500.0,
+        step: float = 2.0,
+    ) -> float:
+        """
+        Computes the maximum collision-free distance along heading_deg from p_start.
+        """
+        if self.engine is None:
+            return max_dist
+        rad = math.radians(heading_deg)
+        u = np.array([math.cos(rad), math.sin(rad), 0.0])
+        num_steps = int(max_dist / step)
+        for s in range(1, num_steps + 1):
+            pt = p_start + s * step * u
+            if not self.engine.is_position_valid(pt):
+                return (s - 1) * step
+        return max_dist
+
+    def get_or_build_prm(self, cache_path: Optional[str] = None) -> Tuple[np.ndarray, Dict[int, List[int]]]:
+        """
+        Loads or builds a city-agnostic Probabilistic Roadmap (PRM) of collision-free street network.
+        """
+        if self._prm_nodes is not None and self._prm_adjacency is not None:
+            return self._prm_nodes, self._prm_adjacency
+
+        if cache_path is None:
+            candidates = [
+                "./data/NYC3KM_585751_4512036/mesh/city_street_prm.pkl",
+                "./mesh/city_street_prm.pkl",
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    cache_path = c
+                    break
+            if cache_path is None:
+                cache_path = "./data/NYC3KM_585751_4512036/mesh/city_street_prm.pkl"
+
+        bounds = self.engine.bounds
+        nodes, adj = build_city_prm(self.engine, bounds, cache_path=cache_path)
+        self._prm_nodes = nodes
+        self._prm_adjacency = adj
+        return self._prm_nodes, self._prm_adjacency
+
+    def find_curved_trajectories(
+        self,
+        duration: float,
+        velocity: float,
+        num_trajectories: int = 6,
+        time_step: float = 1.0,
+        z_height: float = 1.5,
+        min_separation: float = 25.0,
+        max_attempts: int = 2000,
+        existing_trajectories: Optional[List[np.ndarray]] = None,
+        max_overlap_ratio: float = 0.75,
+        proximity_threshold: float = 20.0,
+        cache_path: Optional[str] = None,
+    ) -> List[Tuple[np.ndarray, Dict[str, Any]]]:
+        """
+        Finds `num_trajectories` collision-free curved trajectories that navigate
+        through urban street intersections (start street != end street) using a
+        city-agnostic shortest-path algorithm:
+        - Works for ANY city layout (Manhattan, European curved, synthetic, etc.).
+        - Samples two random points in navigable street space and calculates shortest path (Dijkstra/A*).
+        - Natural direction changes at intersections.
+        - Smooth rounded cornering arcs inside street intersections.
+        - Constant scalar speed v (zero tangential acceleration, centripetal acceleration during turns).
+        - Arc-length parameterization ensuring exact timing across frames.
+        - Mutual overlap <= max_overlap_ratio (default 75%) against all existing trajectories.
+
+        Returns:
+            List of (trajectory_array, metadata_dict) tuples.
+        """
+        if self.engine is None:
+            raise RuntimeError("MotionEngine must be provided to generate curved trajectories.")
+
+        nodes, adjacency = self.get_or_build_prm(cache_path=cache_path)
+        num_nodes = len(nodes)
+        if num_nodes < 2:
+            raise RuntimeError("Not enough valid street nodes found in city PRM.")
+
+        num_frames = int(round(duration / time_step))
+        req_dist = (num_frames - 1) * velocity * time_step
+
+        found_trajectories: List[Tuple[np.ndarray, Dict[str, Any]]] = []
+        batch_trajectories: List[np.ndarray] = []
+        if existing_trajectories is not None:
+            batch_trajectories.extend(existing_trajectories)
+
+        attempts = 0
+        while len(found_trajectories) < num_trajectories and attempts < max_attempts:
+            attempts += 1
+
+            start_idx = np.random.randint(0, num_nodes)
+            p0 = nodes[start_idx]
+
+            # Start point separation check from trajectories found in this batch
+            if any(np.linalg.norm(p0[:2] - prev_traj[0, :2]) < min_separation for prev_traj, _ in found_trajectories):
+                continue
+
+            # Dijkstra shortest path search to candidate targets at >= req_dist
+            pq = [(0.0, start_idx)]
+            dist = {start_idx: 0.0}
+            parent = {start_idx: None}
+            candidates = []
+
+            while pq:
+                d, u = heapq.heappop(pq)
+                if d > dist[u]:
+                    continue
+                if d >= req_dist:
+                    candidates.append(u)
+                    if len(candidates) >= 15:
+                        break
+                    continue
+                for v in adjacency[u]:
+                    w = np.linalg.norm(nodes[u] - nodes[v])
+                    new_d = d + w
+                    if v not in dist or new_d < dist[v]:
+                        dist[v] = new_d
+                        parent[v] = u
+                        heapq.heappush(pq, (new_d, v))
+
+            if not candidates:
+                continue
+
+            target_idx = candidates[np.random.choice(len(candidates))]
+            path = []
+            curr = target_idx
+            while curr is not None:
+                path.append(curr)
+                curr = parent[curr]
+            path.reverse()
+            path_pts = nodes[path]
+
+            # Simplify collinear points along streets, keeping turns
+            simple_pts = simplify_collinear(path_pts, angle_tol_deg=15.0)
+
+            # For paths with travel distance > 150m, require at least 1 turn
+            if req_dist > 150.0 and len(simple_pts) < 3:
+                continue
+
+            # Round corner turns smoothly with intersection fillet arcs
+            rounded = round_corners(simple_pts, corner_radius=10.0)
+
+            diffs = np.diff(rounded, axis=0)
+            cum_dist = np.insert(np.cumsum(np.linalg.norm(diffs, axis=1)), 0, 0.0)
+            if cum_dist[-1] < req_dist:
+                continue
+
+            # Arc-length parameterization at constant speed v * t
+            target_distances = np.arange(num_frames) * (time_step * velocity)
+            final_x = np.interp(target_distances, cum_dist, rounded[:, 0])
+            final_y = np.interp(target_distances, cum_dist, rounded[:, 1])
+            final_z = np.full(num_frames, z_height)
+            traj_arr = np.column_stack((final_x, final_y, final_z))
+
+            # Collision check
+            if not all(self.engine.is_position_valid(p) for p in traj_arr):
+                continue
+
+            # Mutual overlap check against all existing trajectories
+            is_overlapping = False
+            for other_traj in batch_trajectories:
+                overlap = compute_trajectory_overlap(
+                    traj_arr,
+                    other_traj,
+                    proximity_threshold=proximity_threshold,
+                )
+                if overlap > max_overlap_ratio:
+                    is_overlapping = True
+                    break
+
+            if is_overlapping:
+                continue
+
+            # Turn metrics & heading
+            diffs_traj = np.diff(traj_arr[:, :2], axis=0)
+            headings = np.arctan2(diffs_traj[:, 1], diffs_traj[:, 0])
+            ang_diffs = np.abs(np.diff(headings))
+            ang_diffs = np.minimum(ang_diffs, 2 * np.pi - ang_diffs)
+            num_turns = int(np.sum(ang_diffs > np.radians(15.0)))
+            initial_heading = float(math.degrees(headings[0])) % 360.0
+
+            metadata = {
+                "mode": "curved",
+                "curve_type": f"shortest_path_turns_{num_turns}",
+                "num_turns": num_turns,
+                "duration_seconds": duration,
+                "velocity_mps": velocity,
+                "time_step_seconds": time_step,
+                "num_frames": num_frames,
+                "total_distance_meters": float(req_dist),
+                "start_position": traj_arr[0].tolist(),
+                "end_position": traj_arr[-1].tolist(),
+                "heading_degrees": initial_heading,
+                "is_collision_free": True,
+                "kinematics": {
+                    "constant_speed": True,
+                    "constant_velocity_vector": False,
+                    "tangential_acceleration": 0.0,
+                    "has_centripetal_acceleration": True,
+                },
+            }
+
+            found_trajectories.append((traj_arr, metadata))
+            batch_trajectories.append(traj_arr)
+
+        if len(found_trajectories) < num_trajectories:
+            print(
+                f"Warning: Found {len(found_trajectories)}/{num_trajectories} curved trajectories of length {req_dist:.1f}m (overlap <= {max_overlap_ratio*100:.0f}%) after {attempts} attempts."
+            )
+
+        return found_trajectories
+
+
 
 
 # =============================================================================

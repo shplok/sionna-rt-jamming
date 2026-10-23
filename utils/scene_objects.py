@@ -148,3 +148,41 @@ def gather_bboxes(mesh_dir, footprints=True, use_cache=True):
 
     return obstacles
 
+
+def generate_building_height_map(
+    obstacles: list,
+    map_bounds_b: float = 1500.0,
+    cell_size: tuple = (8.0, 8.0),
+    dtype: np.dtype = np.float32,
+) -> np.ndarray:
+    """
+    Rasterizes building heights onto a 2D grid matching Sionna RT radio maps.
+    Pixels without buildings receive 0.0.
+    """
+    from PIL import Image, ImageDraw
+    b = float(map_bounds_b)
+    cs_x, cs_y = float(cell_size[0]), float(cell_size[1])
+    W = int(round(2.0 * b / cs_x))
+    H = int(round(2.0 * b / cs_y))
+
+    sorted_obs = sorted(obstacles, key=lambda o: float(o["max"][2] - o["min"][2]))
+    im = Image.new("F", (W, H), 0.0)
+    draw = ImageDraw.Draw(im)
+
+    for o in sorted_obs:
+        fp = o.get("footprint")
+        h = float(o["max"][2] - o["min"][2])
+        if h <= 0:
+            continue
+        if fp and len(fp) >= 3:
+            poly_grid = [((pt[0] + b) / cs_x, (pt[1] + b) / cs_y) for pt in fp]
+            draw.polygon(poly_grid, fill=h)
+        else:
+            mn, mx = o["min"], o["max"]
+            c0, c1 = (mn[0] + b) / cs_x, (mx[0] + b) / cs_x
+            r0, r1 = (mn[1] + b) / cs_y, (mx[1] + b) / cs_y
+            draw.polygon([(c0, r0), (c1, r0), (c1, r1), (c0, r1)], fill=h)
+
+    return np.array(im, dtype=dtype)
+
+

@@ -243,57 +243,98 @@ def run_generation(args, engine):
 
     for travel_dist, dur, vel in combos:
         print(f"\n--- Combination: {dur}s @ {vel}m/s (travel dist: {travel_dist:.1f}m) ---")
-        corridors = generator.find_straight_street_corridors(
-            required_distance=travel_dist,
-            num_corridors=args.count_per_combo,
-            z_height=args.z_height,
-            min_separation=25.0,
-            max_attempts=40000,
-            existing_trajectories=global_accepted,
-            max_overlap_ratio=args.max_overlap_ratio,
-            proximity_threshold=args.proximity_threshold,
-        )
-
-        for i in range(len(corridors)):
-            traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
-            start_p, heading_deg = corridors[i]
-
-            spec = TrajectorySpec(
+        if args.mode == "curved":
+            results = generator.find_curved_trajectories(
                 duration=dur,
                 velocity=vel,
+                num_trajectories=args.count_per_combo,
                 time_step=args.time_step,
-                mode=args.mode,
-                start_pos=start_p,
-                heading_deg=heading_deg,
                 z_height=args.z_height,
-                inclusive_end=False,
-                name=traj_id,
-                extra_metadata={
-                    "scene": "NYC3KM_585751_4512036",
-                    "index_in_combo": i,
-                    "max_overlap_ratio_allowed": args.max_overlap_ratio,
-                },
+                min_separation=25.0,
+                max_attempts=8000,
+                existing_trajectories=global_accepted,
+                max_overlap_ratio=args.max_overlap_ratio,
+                proximity_threshold=args.proximity_threshold,
+            )
+            for i, (traj_arr, metadata) in enumerate(results):
+                traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
+                metadata["name"] = traj_id
+                metadata["scene"] = "NYC3KM_585751_4512036"
+                metadata["index_in_combo"] = i
+                metadata["max_overlap_ratio_allowed"] = args.max_overlap_ratio
+
+                npy_path, json_path = save_trajectory(args.output_dir, traj_id, traj_arr, metadata)
+                global_accepted.append(traj_arr)
+
+                manifest_entries.append({
+                    "id": traj_id,
+                    "duration_s": dur,
+                    "velocity_mps": vel,
+                    "num_frames": int(traj_arr.shape[0]),
+                    "travel_distance_m": float(metadata["total_distance_meters"]),
+                    "start_pos": metadata["start_position"],
+                    "end_pos": metadata["end_position"],
+                    "heading_deg": float(metadata.get("heading_degrees", 0.0)),
+                    "is_collision_free": bool(metadata["is_collision_free"]),
+                    "curve_type": metadata.get("curve_type", "curved"),
+                    "npy_file": os.path.basename(npy_path),
+                    "json_file": os.path.basename(json_path),
+                })
+                generated_count += 1
+                print(f"  [{generated_count:02d}/{total_expected}] {traj_id} ({metadata.get('curve_type', 'curved')}): shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= {args.max_overlap_ratio * 100:.0f}%)")
+        else:
+            corridors = generator.find_straight_street_corridors(
+                required_distance=travel_dist,
+                num_corridors=args.count_per_combo,
+                z_height=args.z_height,
+                min_separation=25.0,
+                max_attempts=40000,
+                existing_trajectories=global_accepted,
+                max_overlap_ratio=args.max_overlap_ratio,
+                proximity_threshold=args.proximity_threshold,
             )
 
-            traj_arr, metadata = generator.generate_straight(spec)
-            npy_path, json_path = save_trajectory(args.output_dir, traj_id, traj_arr, metadata)
-            global_accepted.append(traj_arr)
+            for i in range(len(corridors)):
+                traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
+                start_p, heading_deg = corridors[i]
 
-            manifest_entries.append({
-                "id": traj_id,
-                "duration_s": dur,
-                "velocity_mps": vel,
-                "num_frames": int(traj_arr.shape[0]),
-                "travel_distance_m": float(metadata["total_distance_meters"]),
-                "start_pos": metadata["start_position"],
-                "end_pos": metadata["end_position"],
-                "heading_deg": float(metadata["heading_degrees"]),
-                "is_collision_free": bool(metadata["is_collision_free"]),
-                "npy_file": os.path.basename(npy_path),
-                "json_file": os.path.basename(json_path),
-            })
-            generated_count += 1
-            print(f"  [{generated_count:02d}/{total_expected}] {traj_id}: shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= 75%)")
+                spec = TrajectorySpec(
+                    duration=dur,
+                    velocity=vel,
+                    time_step=args.time_step,
+                    mode=args.mode,
+                    start_pos=start_p,
+                    heading_deg=heading_deg,
+                    z_height=args.z_height,
+                    inclusive_end=False,
+                    name=traj_id,
+                    extra_metadata={
+                        "scene": "NYC3KM_585751_4512036",
+                        "index_in_combo": i,
+                        "max_overlap_ratio_allowed": args.max_overlap_ratio,
+                    },
+                )
+
+                traj_arr, metadata = generator.generate_straight(spec)
+                npy_path, json_path = save_trajectory(args.output_dir, traj_id, traj_arr, metadata)
+                global_accepted.append(traj_arr)
+
+                manifest_entries.append({
+                    "id": traj_id,
+                    "duration_s": dur,
+                    "velocity_mps": vel,
+                    "num_frames": int(traj_arr.shape[0]),
+                    "travel_distance_m": float(metadata["total_distance_meters"]),
+                    "start_pos": metadata["start_position"],
+                    "end_pos": metadata["end_position"],
+                    "heading_deg": float(metadata["heading_degrees"]),
+                    "is_collision_free": bool(metadata["is_collision_free"]),
+                    "npy_file": os.path.basename(npy_path),
+                    "json_file": os.path.basename(json_path),
+                })
+                generated_count += 1
+                print(f"  [{generated_count:02d}/{total_expected}] {traj_id}: shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= {args.max_overlap_ratio * 100:.0f}%)")
+
 
     # Save manifest
     manifest_path = os.path.join(args.output_dir, "trajectories_manifest.json")
@@ -381,7 +422,7 @@ def run_plot(args, obstacles):
         ax.scatter(traj[0, 0], traj[0, 1], color="#00ff66", s=15, zorder=4)
         ax.scatter(traj[-1, 0], traj[-1, 1], color="#ff3333", s=15, marker="s", zorder=4)
 
-    ax.set_title("NYC 3KM - Generated Single Jammer Trajectories (Collision-Free, Overlap <= 75%)", color="#ffffff", fontsize=13, pad=12)
+    ax.set_title(f"NYC 3KM - Generated Single Jammer {args.mode.capitalize()} Trajectories (Collision-Free, Overlap <= {int(args.max_overlap_ratio * 100)}%)", color="#ffffff", fontsize=13, pad=12)
     ax.set_xlabel("X (meters)", color="#cccccc")
     ax.set_ylabel("Y (meters)", color="#cccccc")
     ax.tick_params(colors="#cccccc")
