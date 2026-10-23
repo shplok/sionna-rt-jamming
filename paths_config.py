@@ -6,18 +6,26 @@ Automatically detects the current execution environment (e.g., Pomplun cluster,
 Northeastern Explorer cluster, or local development) and user, assigning appropriate
 high-capacity scratch and dataset storage paths.
 
-All paths can be overridden via environment variables or CLI flags.
+All paths can be overridden via:
+1. Editing the 2 folder names below.
+2. Setting environment variables (SIONNA_TRAJ_DIR, SIONNA_SIM_OUTPUT_DIR).
+3. CLI argument flags (--output-dir, --sim-output-dir, etc.).
 """
 
 import os
 import sys
 import getpass
 import socket
-import subprocess
 from pathlib import Path
 
 # Repo Root
 REPO_ROOT = Path(__file__).resolve().parent
+
+# ==============================================================================
+# User-Configurable Subfolder Names (Easily modify these 2 anytime)
+# ==============================================================================
+TRAJECTORIES_DIR_NAME = "nyc_curved_jammers"
+SIM_RESULTS_DIR_NAME = "simulation_results_nyc"
 
 
 def detect_site() -> str:
@@ -29,7 +37,7 @@ def detect_site() -> str:
     if env_site:
         return env_site.strip().lower()
 
-    # Fast filesystem and hostname checks (no subprocess)
+    # Fast filesystem and hostname checks
     if os.path.exists("/pomplun"):
         return "pomplun"
     if os.path.exists("/projects/ipl_lab"):
@@ -83,35 +91,33 @@ def get_dataset_root() -> str:
     return str(REPO_ROOT / "datasets")
 
 
-def get_trajectories_dir(mode: str = "curved") -> str:
+# ==============================================================================
+# The 2 Main Target Output Paths
+# ==============================================================================
+
+def get_trajectories_dir(subfolder: str = TRAJECTORIES_DIR_NAME) -> str:
     """
-    Returns the output directory for generated single jammer trajectories.
-    Can be overridden via SIONNA_TRAJ_DIR.
+    Returns the output directory for single jammer trajectories.
+    Override with env var SIONNA_TRAJ_DIR.
     """
     if "SIONNA_TRAJ_DIR" in os.environ:
         return os.path.abspath(os.environ["SIONNA_TRAJ_DIR"])
-    return os.path.join(get_scratch_base_dir(), f"nyc_{mode}_jammers")
+    return os.path.join(get_scratch_base_dir(), subfolder)
 
 
-def get_sim_output_dir() -> str:
+def get_sim_results_dir(subfolder: str = SIM_RESULTS_DIR_NAME) -> str:
     """
-    Returns the output directory for aggregated multi-jammer ray tracing simulations.
-    Can be overridden via SIONNA_SIM_OUTPUT_DIR.
+    Returns the output directory for simulation results (radio maps / intermittent runs).
+    Override with env var SIONNA_SIM_OUTPUT_DIR.
     """
     if "SIONNA_SIM_OUTPUT_DIR" in os.environ:
         return os.path.abspath(os.environ["SIONNA_SIM_OUTPUT_DIR"])
-    return os.path.join(get_scratch_base_dir(), "simulation_results_nyc")
+    return os.path.join(get_scratch_base_dir(), subfolder)
 
 
-def get_intermittent_dir(variant: str = "") -> str:
-    """
-    Returns the output directory for intermittent simulation runs.
-    Can be overridden via SIONNA_INTERMITTENT_DIR.
-    """
-    if "SIONNA_INTERMITTENT_DIR" in os.environ:
-        return os.path.abspath(os.environ["SIONNA_INTERMITTENT_DIR"])
-    suffix = f"_{variant}" if variant else ""
-    return os.path.join(get_scratch_base_dir(), f"simulation_results_nyc_intermittent{suffix}")
+# Backward-compatibility aliases
+get_sim_output_dir = get_sim_results_dir
+get_intermittent_dir = get_sim_results_dir
 
 
 def get_scene_defaults(scene_name: str = "NYC3KM_585751_4512036") -> dict:
@@ -124,7 +130,7 @@ def get_scene_defaults(scene_name: str = "NYC3KM_585751_4512036") -> dict:
 
 
 def print_summary():
-    """Prints a human-readable diagnostic of active paths."""
+    """Prints a clean, concise diagnostic of active paths."""
     print("=" * 60)
     print("sionna_rt_jamming - Environment & Path Configuration")
     print("=" * 60)
@@ -132,11 +138,8 @@ def print_summary():
     print(f"Current User:       {get_current_user()}")
     print(f"Detected Site:      {detect_site()}")
     print(f"Scratch Base Dir:   {get_scratch_base_dir()}")
-    print(f"Trajectories (curv):{get_trajectories_dir('curved')}")
-    print(f"Trajectories (long):{get_trajectories_dir('long')}")
-    print(f"Sim Results Dir:    {get_sim_output_dir()}")
-    print(f"Intermittent Dir:   {get_intermittent_dir()}")
-    print(f"Intermittent (long):{get_intermittent_dir('long')}")
+    print(f"Trajectories Dir:   {get_trajectories_dir()}")
+    print(f"Sim Results Dir:    {get_sim_results_dir()}")
     scene = get_scene_defaults()
     print(f"Default Mesh Dir:   {scene['mesh_dir']}")
     print(f"Default Scene XML:  {scene['scene_path']}")

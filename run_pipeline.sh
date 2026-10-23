@@ -27,8 +27,8 @@ PRECISION="float16"         # Precision for aggregated maps: float16 | float32 |
 
 # Storage locations (auto-detected by paths_config.py or overridden by env vars)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="${OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_trajectories_dir('$MODE'))" 2>/dev/null || echo "$SCRIPT_DIR/datasets/nyc_${MODE}_jammers")}"
-SIM_OUTPUT_DIR="${SIM_OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_sim_output_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/simulation_results_nyc")}"
+OUTPUT_DIR="${OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_trajectories_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/nyc_${MODE}_jammers")}"
+SIM_OUTPUT_DIR="${SIM_OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_sim_results_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/simulation_results_nyc")}"
 
 set -e  # Stop script if any step fails
 

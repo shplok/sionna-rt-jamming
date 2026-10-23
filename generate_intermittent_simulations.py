@@ -33,11 +33,8 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
 import paths_config
 
-DEFAULT_SIM_DIR = paths_config.get_sim_output_dir()
-DEFAULT_INTERMITTENT_DIR = paths_config.get_intermittent_dir()
-DEFAULT_CURVED_TRAJ_DIR = paths_config.get_trajectories_dir("curved")
-DEFAULT_LONG_TRAJ_DIR = paths_config.get_trajectories_dir("long")
-DEFAULT_INTERMITTENT_LONG_DIR = paths_config.get_intermittent_dir("long")
+DEFAULT_SIM_DIR = paths_config.get_sim_results_dir()
+DEFAULT_TRAJ_DIR = paths_config.get_trajectories_dir()
 DEFAULT_MESH_DIR = paths_config.get_scene_defaults()["mesh_dir"]
 
 NOISE_FLOOR_WATTS_DEFAULT = 8e-15
@@ -511,8 +508,8 @@ def plot_intermittent_timeline(summary_json_path: str, output_image_path: str):
 
 
 def run_long_3jammers_preset(
-    traj_dir: str = DEFAULT_LONG_TRAJ_DIR,
-    output_dir: str = DEFAULT_INTERMITTENT_LONG_DIR,
+    traj_dir: str = DEFAULT_TRAJ_DIR,
+    output_dir: str = DEFAULT_SIM_DIR,
     mesh_dir: str = DEFAULT_MESH_DIR,
     fps: int = 6,
     generate_gif: bool = True,
@@ -693,8 +690,8 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=DEFAULT_INTERMITTENT_DIR,
-        help=f"Clone output directory for intermittent simulations (default: {DEFAULT_INTERMITTENT_DIR})",
+        default=DEFAULT_SIM_DIR,
+        help=f"Clone output directory for intermittent simulations (default: {DEFAULT_SIM_DIR})",
     )
     parser.add_argument(
         "--radio-maps-dir",
@@ -766,8 +763,8 @@ def parse_args():
     parser.add_argument(
         "--trajectories-dir",
         type=str,
-        default=DEFAULT_CURVED_TRAJ_DIR,
-        help=f"Directory with single jammer trajectory coordinates .npy (default: {DEFAULT_CURVED_TRAJ_DIR}).",
+        default=DEFAULT_TRAJ_DIR,
+        help=f"Directory with single jammer trajectory coordinates .npy (default: {DEFAULT_TRAJ_DIR}).",
     )
     parser.add_argument(
         "--mesh-dir",
@@ -801,11 +798,9 @@ def main():
 
     # Preset shortcut
     if args.preset == "long_3jammers":
-        traj_dir = args.trajectories_dir if args.trajectories_dir != DEFAULT_CURVED_TRAJ_DIR else DEFAULT_LONG_TRAJ_DIR
-        out_dir = args.output_dir if args.output_dir != DEFAULT_INTERMITTENT_DIR else DEFAULT_INTERMITTENT_LONG_DIR
         run_long_3jammers_preset(
-            traj_dir=traj_dir,
-            output_dir=out_dir,
+            traj_dir=args.trajectories_dir,
+            output_dir=args.output_dir,
             mesh_dir=args.mesh_dir,
             fps=args.fps,
             generate_gif=True,

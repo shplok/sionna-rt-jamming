@@ -40,8 +40,8 @@ def setup_mitsuba_variant(preferred="cuda_ad_mono_polarized"):
 def parse_args():
     import paths_config
     scene_defs = paths_config.get_scene_defaults()
-    default_traj_dir = paths_config.get_trajectories_dir("curved")
-    default_sim_dir = paths_config.get_sim_output_dir()
+    default_traj_dir = paths_config.get_trajectories_dir()
+    default_sim_dir = paths_config.get_sim_results_dir()
 
     parser = argparse.ArgumentParser(
         description="Unified non-interactive pipeline for trajectory generation and Sionna RT simulation."
