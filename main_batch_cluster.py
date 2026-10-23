@@ -435,7 +435,7 @@ def run_generation(args, engine):
             )
 
             traj_arr, metadata = generator.generate_straight(spec)
-            npy_path, json_path = save_trajectory(args.output_dir, traj_id, traj_arr, metadata)
+            npy_path, _ = save_trajectory(args.output_dir, traj_id, traj_arr, metadata, save_json=False)
             global_accepted.append(traj_arr)
 
             manifest_entries.append({
@@ -449,7 +449,7 @@ def run_generation(args, engine):
                 "heading_deg": float(metadata["heading_degrees"]),
                 "is_collision_free": bool(metadata["is_collision_free"]),
                 "npy_file": os.path.basename(npy_path),
-                "json_file": os.path.basename(json_path),
+                "kinematics": metadata.get("kinematics", {}),
             })
             generated_count += 1
             print(f"  [{generated_count:02d}/{total_expected}] {traj_id}: shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= 75%)")

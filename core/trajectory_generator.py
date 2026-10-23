@@ -836,18 +836,23 @@ def save_trajectory(
     output_dir: str,
     trajectory_id: str,
     trajectory: np.ndarray,
-    metadata: Dict[str, Any],
-) -> Tuple[str, str]:
+    metadata: Optional[Dict[str, Any]] = None,
+    save_json: bool = False,
+) -> Tuple[str, Optional[str]]:
     """
-    Saves a trajectory array (.npy) and its metadata (.json) to output_dir.
+    Saves a trajectory array (.npy) to output_dir.
+    Metadata is aggregated at dataset level in trajectories_manifest.json,
+    avoiding redundant individual JSON files.
     """
     os.makedirs(output_dir, exist_ok=True)
     npy_path = os.path.join(output_dir, f"{trajectory_id}.npy")
-    json_path = os.path.join(output_dir, f"{trajectory_id}.json")
-
     np.save(npy_path, trajectory)
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
+
+    json_path = None
+    if save_json and metadata:
+        json_path = os.path.join(output_dir, f"{trajectory_id}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
 
     return npy_path, json_path
 
