@@ -34,7 +34,28 @@ datasets/batch_simulation_nyc/          <- --dataset-dir
 
 **Why the detector gets its own library.** DeepMTL is a single-snapshot model — motion is irrelevant. Sampling from trajectories would confine every training jammer to 54 corridors with adjacent frames correlated at r = 0.884. Independent static positions cost the same 0.235 s of GPU each and scatter over the whole street network. It also removes a methodological trap: the detector never sees a trajectory frame, so detections fed to the tracker are **out-of-sample by construction**.
 
-> **Dataset fully generated.** GPU job 10357699 (2026-09-15, ~1.9 h) produced all 54 trajectory maps and 20 000 static maps. CPU job 10361058 (2026-09-15) produced all scenarios, samples, splits, and labels — 13/13 validation checks passed.
+> **Dataset fully generated, with cleaned radio maps (2026-10-18).** The first generation (GPU job 10357699 and CPU job 10361058, 2026-09-15) used one trace per map, and its maps contained Monte-Carlo artefacts (below). Every radio map was then re-traced and cleaned, and everything built from the maps (`multi_static_jammers/`, `multi_trajectory_jammers/`) was rebuilt. Positions, trajectories, `splits.json`, sensors and labels are unchanged, byte for byte. `validate_dataset.py`: 14/14 checks passed. The uncleaned first generation has been deleted.
+
+## Radio-map cleaning (the fix, standard from now on)
+
+**The problem.** Sionna RT's `RadioMapSolver` is a Monte-Carlo estimator. With the jammer and the measurement plane at the same height (1.5 m), a diffracted ray that reaches a cell at a grazing angle gets a huge integration weight, and a single ray turns one cell into an isolated spike: tens of dB above its neighbours, in the worst cells up to 50 dBW from a 10 dBW jammer. Some cells also came out NaN or infinite. A different solver seed puts the spikes in different cells. Sionna itself is not patched.
+
+**The fix**, applied to every single-jammer map (static map or trajectory frame) before any aggregation (`utils/map_cleaning.py`; on by default in `main_batch_cluster.py`, see the repo README):
+
+1. trace with seeds 42, 7 and 123 and keep the per-cell **median** of the three powers;
+2. **despike**: a cell above −100 dBW, more than 20 dB above each of its 8 neighbours and more than 30 m from the jammer gets the median of its positive neighbours;
+3. **cap**: cells above the transmit power (10 dBW) get the neighbour median (it fired once in 20 000 static maps);
+4. NaN / infinite cells get the neighbour median.
+
+Every other setting is the original one: unmodified Sionna RT 2.1.0 (mitsuba 3.9.1, drjit 1.5.0 with the OptiX patch), plane height = jammer height = 1.5 m, 10 dBW, GPS L1, isotropic antennas, 10^7 rays per transmitter, max depth 80, line of sight + specular reflection + refraction + diffraction + edge diffraction.
+
+**Provenance.** Each map folder (and each derived multi-jammer folder) holds a `map_cleaning.json` with these settings; the generator refuses to add maps made with different settings. The raw per-seed maps and the per-map counts of cleaned cells are kept in `datasets/_raw/<dataset>/`.
+
+**Reproducibility.** GPU ray tracing is not bit-reproducible run to run, even with the same seed: re-tracing agrees to within 1e-6 dB in more than 99.9 % of cells, and a few cells near the jammer differ by more than 0.5 dB. The cleaning itself is deterministic given the raw maps.
+
+**The figures below** were made from the first generation. The positions, sensors and statistics they show are unchanged, and the RSS panels differ only in the isolated spike cells.
+
+**Other datasets in `datasets/`**, made the same way for the TAES paper: `batch_simulation_nyc_traj60/` (102 trajectories of 60 frames, 1 000 val/test tracking scenarios), `batch_simulation_nyc_traj60_train/` (300 training trajectories, 3 000 scenarios) and `batch_simulation_nyc_pdmap/` (27 788 single-jammer maps, one per street cell).
 
 ---
 
@@ -638,7 +659,7 @@ Tracking branch, against the real base maps:
 | ✅ | `run_pipeline_gpu.sh` / `run_pipeline_cpu.sh` — GPU and CPU jobs separated |
 | ✅ | Settled: 10 m grid, 20 000 positions → 14k/3k/3k, 70k/15k/15k samples, K 0–10 stratified, fixed TX power, σ = 1 dB, random position split |
 
-**Base libraries: generated.** GPU job `10357699` on Explorer, 1 h 53 m, exit 0.
+**Base libraries: generated, then re-traced with the radio-map cleaning (2026-10-18).** The table describes the first generation (GPU job `10357699` on Explorer, 1 h 53 m, exit 0); the cleaned libraries have the same shapes and sizes and took about three times as long.
 
 | | |
 |---|---|

@@ -27,10 +27,11 @@ Only the two simulate_* stages need a GPU. Everything else is NumPy and runs on 
 CPU node. Run scripts/batch_cluster/make_splits.py after both simulate_* stages
 and before either aggregate stage. See README.md for the full sequence.
 
-Radio-map cleaning (off by default): --clean-seeds 42 7 123 traces every single-jammer
-map once per seed and stores the per-cell median with spikes and over-power cells
-repaired (utils/map_cleaning.py, README "Radio-map cleaning"). Each map folder records
-its settings in map_cleaning.json and runs with other settings are refused.
+Radio-map cleaning (on by default): every single-jammer map is traced once per seed
+(--clean-seeds, default 42 7 123) and stored as the per-cell median with spikes and
+over-power cells repaired (utils/map_cleaning.py, README "Radio-map cleaning"). Each map
+folder records its settings in map_cleaning.json and runs with other settings are
+refused. --no-clean gives the raw solver maps (one trace, default seed).
 
 Usage:
     python main_batch_cluster.py --action all --dataset-dir ./datasets/batch_simulation_nyc
@@ -260,18 +261,22 @@ def parse_args():
         help="Floating-point precision for saving aggregated radio maps (default: 'float16'; options: float16, float32, float64).",
     )
     # Radio-map cleaning (simulate_bases / simulate_static); see utils/map_cleaning.py and
-    # "Radio-map cleaning" in the README. Off by default: maps straight from the solver.
+    # "Radio-map cleaning" in the README. On by default.
     parser.add_argument(
-        "--clean-seeds", type=int, nargs="+", default=None, metavar="SEED",
+        "--clean-seeds", type=int, nargs="+", default=[42, 7, 123], metavar="SEED",
         help="Trace every single-jammer map once per solver seed and store the cleaned "
              "map: per-cell median, despiking, cap at the transmit power, non-finite "
-             "repair. At least 3 distinct seeds; the cleaned datasets use 42 7 123. "
-             "Default: off (one trace, solver default seed).",
+             "repair. At least 3 distinct seeds (default: 42 7 123).",
+    )
+    parser.add_argument(
+        "--no-clean", action="store_true",
+        help="Store the raw solver maps instead (one trace per map, solver default seed). "
+             "They contain isolated spikes; see the README before using this.",
     )
     parser.add_argument(
         "--raw-maps-dir", type=str, default=None,
-        help="With --clean-seeds: also keep the raw per-seed maps and the per-map cleaning "
-             "counts here (optional; about 3x the size of the cleaned maps).",
+        help="Also keep the raw per-seed maps and the per-map cleaning counts here "
+             "(optional; about 3x the size of the cleaned maps).",
     )
     parser.add_argument(
         "--despike-db", type=float, default=20.0,
@@ -307,6 +312,8 @@ def parse_args():
 
 def check_cleaning_args(args):
     """Reject combinations of the cleaning / parallel-run flags that would silently misbehave."""
+    if args.no_clean:
+        args.clean_seeds = None
     if args.clean_seeds is not None:
         if len(set(args.clean_seeds)) != len(args.clean_seeds):
             raise SystemExit(f"--clean-seeds has repeated seeds: {args.clean_seeds}")
@@ -314,7 +321,7 @@ def check_cleaning_args(args):
             raise SystemExit("--clean-seeds needs at least 3 seeds: the median of 1 or 2 "
                              "realisations does not reject a single-seed spike.")
     if args.raw_maps_dir is not None and args.clean_seeds is None:
-        raise SystemExit("--raw-maps-dir only makes sense with --clean-seeds.")
+        raise SystemExit("--raw-maps-dir only makes sense with cleaning (not with --no-clean).")
     if args.despike_db <= 0 or args.despike_excl_m < 0:
         raise SystemExit("--despike-db must be > 0 and --despike-excl-m >= 0.")
     if args.static_range is not None:
@@ -332,7 +339,7 @@ def check_cleaning_args(args):
 
 
 def cleaning_config(args):
-    """The map_cleaning.json settings for this run (NO_CLEANING without --clean-seeds)."""
+    """The map_cleaning.json settings for this run (NO_CLEANING with --no-clean)."""
     from utils.map_cleaning import NO_CLEANING, make_config
     if not args.clean_seeds:
         return dict(NO_CLEANING)

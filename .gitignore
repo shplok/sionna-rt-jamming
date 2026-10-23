@@ -35,8 +35,5 @@ logs/
 venv/
 SESSION_*.md
 
-# The cleaned-map datasets (median of seeds + despiking, see "Radio-map cleaning" in the
-# README) live next to datasets/ and are never versioned either.
-/datasets_rtfix/
 # NFS keeps deleted-but-open files as .nfsXXXX until the last handle closes
 .nfs*

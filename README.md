@@ -23,8 +23,8 @@ locally.
 
 (*To be precise: CUDA is a throughput requirement, not a functional one. Both entry points try
 `cuda_ad_mono_polarized` and fall back to `llvm_ad_mono_polarized`, which is numerically
-correct — just ~94× slower, 22 s per trace versus 0.235 s. Batch needs 23 240 traces: ~1.5 h
-on an A100, ~140 h on CPU. Interactive needs a handful at the same cost each, so CPU is the
+correct — just ~94× slower, 22 s per trace versus 0.235 s. Batch needs 23 240 maps, each traced three
+times with the default map cleaning: ~4.6 h on an A100, ~430 h on CPU. Interactive needs a handful at the same cost each, so CPU is the
 intended local path, not a downgrade.*)
 
 The dataset itself is documented separately, in
@@ -91,7 +91,7 @@ and 1.5 cells per frame at 3, 9 and 15 m/s — at 3 m/s it does not even leave i
 It also keeps the two models honest: the detector never sees a trajectory frame, so the
 detections it feeds to the tracker are **out-of-sample by construction**.
 
-**Total: ~1.5 h of GPU, then everything else on CPU.** About 96 GB of output.
+**Total: ~4.6 h of GPU, then everything else on CPU.** About 96 GB of output.
 
 ---
 
@@ -115,7 +115,7 @@ import Sionna or Mitsuba — those imports are local to `run_base_simulations()`
 `run_static_simulation()` — and they run fine on a login node in seconds. They sit in the GPU
 job purely because each must precede its `simulate_*` partner and costs nothing to include.
 
-Submitting them as two jobs matters: ray tracing takes ~1.5 h, the CPU work takes longer, and
+Submitting them as two jobs matters: ray tracing takes ~4.6 h, the CPU work takes hours too, and
 holding a GPU reservation through the CPU half would waste it.
 
 ---
@@ -141,8 +141,7 @@ holding a GPU reservation through the CPU half would waste it.
 | `core/trajectory_generator.py` | Headless straight-corridor trajectory generation |
 | `ui/` | Tkinter menus and planners |
 | `utils/scene_objects.py` | Antenna arrays, mesh bbox extraction (cached) |
-| `utils/map_cleaning.py` | Radio-map cleaning: median of solver seeds + despiking (`--clean-seeds`) |
-| `tests/test_map_cleaning.py` | Tests for the cleaning (CPU) |
+| `utils/map_cleaning.py` | Radio-map cleaning: median of 3 solver seeds + despiking (on by default) |
 | `utils/plotter.py` | Plotting library — RSS animation GIF, single panels, contact sheets |
 | `utils/jammer_config.py` | Persists edited initial positions back to `main_interactive_local.py` |
 | `scripts/interactive_local/visualize_paths.py` | Tk GUI browser for saved path `.npy` files — **laptop only** |
@@ -477,7 +476,7 @@ srun --partition=gpu --gres=gpu:a100:1 --nodes=1 --ntasks=1 --mem=16G --time=00:
 
 Expect `shape (20, 300, 300) float32`, positive max, `SMOKE TEST PASSED`. Then `rm -rf ./datasets/batch_simulation_smoke`. You can submit steps 4–5 from that same shell.
 
-**Step 4 — GPU job** (~1.5 h): trajectories + radio maps, static positions + radio maps.
+**Step 4 — GPU job** (~4.6 h): trajectories + radio maps, static positions + radio maps.
 
 ```bash
 ./submit.sh gpu
@@ -510,13 +509,13 @@ du -sh datasets/batch_simulation_nyc/*
 | `Base maps are 375x375 but splits.json expects 300x300` | Stale library — same fix as above |
 | `splits.json has no 'static' section` | `make_splits.py` ran before `generate_static`. Re-run it |
 | GPU job preempted mid-`simulate_static` | Harmless — it checkpoints every 50 positions to `watts.progress.json`. Just resubmit |
-| `REFUSING: ... map_cleaning.json records the cleaning ...` | The folder was made with other `--clean-seeds` / despike settings (or none). Use the recorded ones, or a new `--dataset-dir` — see Radio-map cleaning |
+| `REFUSING: ... map_cleaning.json records the cleaning ...` | The folder was made with other cleaning settings (or with `--no-clean`). Use the recorded ones, or a new `--dataset-dir` — see Radio-map cleaning |
 
 #### Timing and footprint
 
 | | Wall | Output |
 |---|---|---|
-| GPU job | ~1.5 h (4 h requested) | ~8.4 GB of base libraries |
+| GPU job | ~4.6 h (8 h requested) | ~8.4 GB of base libraries |
 | CPU job | ~1–2 h, mostly I/O (8 h requested) | ~64 GB of scenarios and samples |
 
 ---
@@ -542,9 +541,9 @@ datasets/batch_simulation_<tag>/     <- --dataset-dir
 
 ```bash
 sbatch run_pipeline_gpu.sh     # A1 static positions   [CPU, seconds]
-                               # A2 static maps        [GPU, ~78 min]
+                               # A2 static maps        [GPU, ~4 h]
                                # A3 trajectories       [CPU, seconds]
-                               # A4 trajectory maps    [GPU, ~13 min]
+                               # A4 trajectory maps    [GPU, ~40 min]
 
 sbatch run_pipeline_cpu.sh     # B1 splits.json        [CPU]
                                # B2 labels             [CPU]
@@ -600,18 +599,20 @@ little here because runtime is dominated by `--samples-per-tx`.
 - **RAM is the CPU-side constraint:** `aggregate` holds one pool (~1.4 GB); `aggregate_static` memmaps the 7.2 GB static library.
 - **`datasets/` is gitignored** — move results off the node yourself.
 
-### Radio-map cleaning (`--clean-seeds`)
+### Radio-map cleaning (on by default)
 
 **Why.** `RadioMapSolver` is a Monte-Carlo estimator, and with the jammer and the
 measurement plane at the same height (1.5 m) a diffracted ray that hits a cell at a grazing
 angle gets a huge integration weight (`_diffraction_integration_weight` in Sionna's
 `radio_map.py`). One such ray turns one cell into an isolated spike, tens of dB above its
-neighbours and sometimes above the transmit power. Changing the solver seed moves the
-spikes to other cells. Sionna is not patched; the generator cleans the maps instead.
+neighbours and sometimes above the transmit power (up to 50 dBW from a 10 dBW jammer), and
+some cells come out NaN or infinite. Changing the solver seed moves the spikes to other
+cells. Sionna is not patched; the generator cleans every map instead.
 
 **What it does** (`utils/map_cleaning.py`, per single-jammer map, before any aggregation):
 
-1. trace the map once per seed and take the per-cell **median**;
+1. trace the map once per seed (`--clean-seeds`, default 42 7 123) and take the per-cell
+   **median**;
 2. **despike**: a cell more than `--despike-db` (20) dB above *all 8* neighbours, more than
    `--despike-excl-m` (30) m from the jammer and above `--despike-floor-dbw` (−100 dBW)
    gets the median of its neighbours;
@@ -622,49 +623,44 @@ spikes to other cells. Sionna is not patched; the generator cleans the maps inst
 A clump of two or more adjacent spiky cells is not caught by step 2 (each has a high
 neighbour); step 3 still bounds it.
 
-**Running it.** Add `--clean-seeds 42 7 123` to `simulate_static` and `simulate_bases`
-(these are the seeds of the cleaned datasets). Without the flag nothing changes: one trace
-per map, solver default seed. `--raw-maps-dir DIR` also keeps the raw per-seed maps and
-the per-map counts of cleaned cells (`clean_counts*.npy`: despike, cap, non-finite,
-touched). Ray tracing takes **3× as long** (about 4 h for 20 000 static positions plus
-40 min for the trajectories), so raise `--time`, or split the work:
+**Cost.** Three traces per map, so ray tracing takes **3× as long**: about 4 h for 20 000
+static positions plus 40 min for the trajectories (`run_pipeline_gpu.sh` requests 8 h).
+`--raw-maps-dir DIR` also keeps the raw per-seed maps and the per-map counts of cleaned
+cells (`clean_counts*.npy`: despike, cap, non-finite, touched). `--no-clean` gives the raw
+solver maps (one trace, default seed); they contain the spikes, so use it only to study
+them. To split the ray tracing over several GPU jobs:
 
 ```bash
-# static positions over several GPU jobs
-python main_batch_cluster.py --action init_static_ranges  $COMMON --clean-seeds 42 7 123   # CPU, once
-python main_batch_cluster.py --action simulate_static     $COMMON --clean-seeds 42 7 123 \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --static-range 0 5000      # one job per range
-python main_batch_cluster.py --action merge_static_ranges $COMMON --clean-seeds 42 7 123   # CPU, once
-# trajectories over N GPU jobs, then once more without --traj-shard to write the manifest
-python main_batch_cluster.py --action simulate_bases $COMMON --clean-seeds 42 7 123 \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --traj-shard 0 4           # ... 3 4
+# static positions
+python main_batch_cluster.py --action init_static_ranges  $COMMON                         # CPU, once
+python main_batch_cluster.py --action simulate_static     $COMMON \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --static-range 0 5000     # one job per range
+python main_batch_cluster.py --action merge_static_ranges $COMMON                         # CPU, once
+# trajectories over N jobs, then once more without --traj-shard to write the manifest
+python main_batch_cluster.py --action simulate_bases $COMMON \
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 --traj-shard 0 4          # ... 3 4
 ```
 
 Every range job writes its own part files under `single_static_jammers/range_parts/`
 (resumable). The merge checks that the ranges cover every position exactly once, copies
-them in, verifies the copy and deletes the parts. With the shell scripts:
-`CLEAN_SEEDS="42 7 123" DATASET_DIR=... sbatch --time=08:00:00 run_pipeline_gpu.sh`.
+them in, verifies the copy and deletes the parts.
 
 **Provenance.** Every map folder gets a `map_cleaning.json` (method, seeds, thresholds, cap,
 noise floor, Sionna version, date), and the settings are also stored in
 `radio_maps_manifest.json`, each `rm_*.json` and `watts.progress.json`. The aggregate stages
 copy the record into `multi_static_jammers/` and `multi_trajectory_jammers/`, so a
-downstream user can tell a cleaned dataset from an uncleaned one.
+downstream user can tell how a dataset's maps were made.
 
 **Guard.** A run whose cleaning settings differ from the folder's `map_cleaning.json` is
-refused, and so is a cleaned run into a folder that already holds maps without a record
-(the maps made before this record existed are uncleaned). Cleaned and uncleaned maps never
-end up in one dataset; **use a new `--dataset-dir` for a cleaned dataset.**
+refused, and so is a cleaned run into a folder that holds maps without a record (maps made
+before the record existed are uncleaned). Cleaned and uncleaned maps never end up in one
+dataset.
 
 **Reproducibility.** Sionna's GPU ray accumulation is not bit-reproducible: tracing the
 same position twice with the same seed agrees to within 1e-6 dB in more than 99.9 % of
 cells, but a few cells (0.01-0.3 %, mostly near the jammer) differ by more than 0.5 dB.
-A regenerated dataset therefore matches the original to that level, not bit for bit,
-with or without cleaning. The cleaning itself is deterministic given the raw maps.
-
-`tests/test_map_cleaning.py` (CPU, seconds) checks the steps on synthetic maps and, when
-`datasets_rtfix/` is present, reproduces stored cleaned maps from their stored raw seeds
-bit for bit.
+A regenerated dataset therefore matches the original to that level, not bit for bit. The
+cleaning itself is deterministic given the raw maps.
 
 ---
 

@@ -22,7 +22,7 @@ Steps, for one single-jammer map (watts, shape (H, W)):
 Known limitation: a clump of two or more adjacent spiky cells is not caught by step 2
 (each cell has a high neighbour); step 3 still bounds it by the transmit power.
 
-The defaults are the ones the datasets_rtfix maps were generated with; changing any of
+The defaults are the ones the TAES datasets in datasets/ were generated with; changing any of
 them changes the dataset, and main_batch_cluster.py refuses to mix settings in one folder.
 """
 

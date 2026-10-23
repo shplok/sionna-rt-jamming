@@ -114,7 +114,7 @@ fi
 export MITSUBA_VARIANT="${MITSUBA_VARIANT:-cuda_ad_mono_polarized}"
 export SIONNA_GPU_MEM="${SIONNA_GPU_MEM:-16G}"
 export SIONNA_CPU_MEM="${SIONNA_CPU_MEM:-32G}"
-export SIONNA_GPU_TIME="${SIONNA_GPU_TIME:-04:00:00}"
+export SIONNA_GPU_TIME="${SIONNA_GPU_TIME:-08:00:00}"   # ~4.6 h with the default map cleaning
 export SIONNA_CPU_TIME="${SIONNA_CPU_TIME:-08:00:00}"
 export SIONNA_SITE
 

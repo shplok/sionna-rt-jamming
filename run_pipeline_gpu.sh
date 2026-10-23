@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/gpu_%j.out
 #SBATCH --error=logs/gpu_%j.err
 
@@ -16,18 +16,15 @@
 # ==============================================================================
 # Stage A - everything that needs a GPU.  Submit:  sbatch run_pipeline_gpu.sh
 #
-# Ray tracing only. ~1.5 h for the defaults below. When this finishes, run
+# Ray tracing only. ~4.6 h for the defaults below (3 traces per map, see
+# "Radio-map cleaning" in the README). When this finishes, run
 # run_pipeline_cpu.sh on a CPU partition - none of the remaining work touches
 # the GPU, so holding a GPU allocation for it would waste the reservation.
 # ==============================================================================
 SCENE_DIR="./data/NYC3KM_585751_4512036"
 CELL_SIZE=10                # 3000 m / 10 m = 300 x 300, same cell as DeepMTL
 MAP_BOUNDS_B=1500
-N_STATIC=20000              # static jammer positions; 0.235 s each => ~78 min
-# Radio-map cleaning (README, "Radio-map cleaning"): empty = off, one trace per map.
-# "42 7 123" = the cleaned datasets: 3 traces per map, so ~3x the time; raise --time and
-# use a new DATASET_DIR (the generator refuses to mix cleaned and uncleaned maps).
-CLEAN_SEEDS="${CLEAN_SEEDS:-}"
+N_STATIC=20000              # static jammer positions; 3 x 0.235 s each => ~4 h
 
 set -e
 mkdir -p logs
@@ -59,17 +56,15 @@ python -c "import mitsuba as mi; mi.set_variant('cuda_ad_mono_polarized'); print
 COMMON="--dataset-dir $DATASET_DIR --scene-path $SCENE_DIR/simple_OSM_scene.xml \
         --mesh-dir $SCENE_DIR/mesh --map-bounds-b $MAP_BOUNDS_B \
         --cell-size $CELL_SIZE $CELL_SIZE --seed 42"
-CLEAN="${CLEAN_SEEDS:+--clean-seeds $CLEAN_SEEDS}"
-echo "map cleaning: ${CLEAN:-off}"
 
 # --- detection branch ---------------------------------------------------------
 echo -e "\n[A1/4] static positions (CPU, seconds)"
 python main_batch_cluster.py --action generate_static $COMMON \
     --n-static $N_STATIC --z-height 1.5
 
-echo -e "\n[A2/4] static radio maps (GPU, ~78 min at N=20000)"
+echo -e "\n[A2/4] static radio maps (GPU, ~4 h at N=20000, cleaned)"
 python main_batch_cluster.py --action simulate_static $COMMON \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 $CLEAN
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 
 # --- tracking branch ----------------------------------------------------------
 echo -e "\n[A3/4] trajectories (CPU, seconds)"
@@ -78,11 +73,11 @@ python main_batch_cluster.py --action generate $COMMON \
     --mode straight --max-overlap-ratio 0.75 --proximity-threshold 20.0 \
     --z-height 1.5 --time-step 1.0
 
-echo -e "\n[A4/4] trajectory radio maps (GPU, ~13 min)"
+echo -e "\n[A4/4] trajectory radio maps (GPU, ~40 min, cleaned)"
 # NOTE: resumes by filename and does NOT check the grid. If you change CELL_SIZE,
 # delete $DATASET_DIR/single_trajectory_jammers/radio_maps first.
 python main_batch_cluster.py --action simulate_bases $COMMON \
-    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0 $CLEAN
+    --samples-per-tx 10000000 --max-depth 80 --power-dbw 10.0
 
 echo -e "\n=== GPU stage done: $(date) ==="
 echo "Next: sbatch run_pipeline_cpu.sh   (no GPU needed)"
