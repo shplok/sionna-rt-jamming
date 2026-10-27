@@ -27,13 +27,16 @@ PRECISION="float16"         # Precision for aggregated maps: float16 | float32 |
 
 # Storage locations (auto-detected by paths_config.py or overridden by env vars)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="${OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_trajectories_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/nyc_${MODE}_jammers")}"
-SIM_OUTPUT_DIR="${SIM_OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import paths_config; print(paths_config.get_sim_results_dir())" 2>/dev/null || echo "$SCRIPT_DIR/datasets/simulation_results_nyc")}"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_DIR"
+
+OUTPUT_DIR="${OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$REPO_DIR'); import paths_config; print(paths_config.get_trajectories_dir())" 2>/dev/null || echo "$REPO_DIR/datasets/nyc_${MODE}_jammers")}"
+SIM_OUTPUT_DIR="${SIM_OUTPUT_DIR:-$(python3 -c "import sys; sys.path.insert(0, '$REPO_DIR'); import paths_config; print(paths_config.get_sim_results_dir())" 2>/dev/null || echo "$REPO_DIR/datasets/simulation_results_nyc")}"
 
 set -e  # Stop script if any step fails
 
 echo "=================================================================="
-echo "Sionna RT Jamming - Unified Pipeline"
+echo "Sionna RT Jamming - Unified Pipeline (TMLR)"
 echo "Host: $(hostname)"
 echo "Start time: $(date)"
 echo "Action: $ACTION | Mode: $MODE | Combos: $NUM_COMBINATIONS (Jammers: $MIN_JAMMERS-$MAX_JAMMERS)"
@@ -47,8 +50,9 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p "$SIM_OUTPUT_DIR"
 
 # 0. Load server/environment settings (editable in server_env.sh or server_config.json)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/server_env.sh" ]; then
+if [ -f "${REPO_DIR}/server_env.sh" ]; then
+    source "${REPO_DIR}/server_env.sh"
+elif [ -f "${SCRIPT_DIR}/server_env.sh" ]; then
     source "${SCRIPT_DIR}/server_env.sh"
 fi
 

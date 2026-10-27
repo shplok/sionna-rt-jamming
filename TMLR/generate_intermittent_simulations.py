@@ -25,13 +25,21 @@ Features:
 """
 
 import os
+import sys
 import glob
 import json
 import time
 import argparse
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
-import numpy as np
+
+# Ensure repository root is in sys.path regardless of working directory
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import paths_config
+import numpy as np
 
 DEFAULT_SIM_DIR = paths_config.get_sim_results_dir()
 DEFAULT_TRAJ_DIR = paths_config.get_trajectories_dir()
@@ -227,8 +235,14 @@ class IntermittentSimulator:
             self.radio_maps_dir = os.path.abspath(radio_maps_dir)
         else:
             candidates = [
-                os.path.join(os.path.dirname(self.input_sim_dir), "nyc_curved_jammers", "radio_maps"),
                 os.path.join(self.input_sim_dir, "radio_maps"),
+                os.path.join(os.path.dirname(self.input_sim_dir), "single_trajectory_jammers", "radio_maps"),
+                os.path.join(os.path.dirname(self.input_sim_dir), "radio_maps"),
+                os.path.join(paths_config.get_trajectories_dir(), "radio_maps"),
+                os.path.join(paths_config.get_scratch_base_dir(), "single_trajectory_jammers", "radio_maps"),
+                os.path.join(paths_config.get_dataset_root(), "batch_simulation_nyc", "single_trajectory_jammers", "radio_maps"),
+                os.path.join(os.path.dirname(self.input_sim_dir), "nyc_curved_jammers", "radio_maps"),
+                "./datasets/batch_simulation_nyc/single_trajectory_jammers/radio_maps",
                 "./datasets/nyc_single_jammers/radio_maps",
                 "./nyc_curved_jammers/radio_maps",
             ]
@@ -274,17 +288,39 @@ class IntermittentSimulator:
     ) -> List[Dict[str, Any]]:
         """
         Clones combinations, applies the intermittent schedule, and saves output.
+        Supports both random combinations_manifest.json and splits scenario folders from main_batch_cluster.py.
         """
         manifest_path = os.path.join(self.input_sim_dir, "combinations_manifest.json")
-        if not os.path.exists(manifest_path):
-            raise FileNotFoundError(f"Manifest not found in {self.input_sim_dir}: {manifest_path}")
+        combinations = []
+        if os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                src_manifest = json.load(f)
+            combinations = src_manifest.get("combinations", [])
+        else:
+            # Check for individual scenario/combination summary JSON files from main_batch_cluster.py
+            summary_files = sorted(glob.glob(os.path.join(self.input_sim_dir, "**", "scenario_summary.json"), recursive=True) + \
+                                   glob.glob(os.path.join(self.input_sim_dir, "**", "combination_summary.json"), recursive=True))
+            for sf in summary_files:
+                with open(sf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cid = data.get("combination_id") or data.get("scenario_id") or os.path.basename(os.path.dirname(sf))
+                jids = [j["traj_id"] for j in data.get("jammers", [])]
+                if not jids:
+                    continue
+                k = data.get("num_jammers", len(jids))
+                combinations.append({
+                    "combo_id": cid,
+                    "num_jammers": k,
+                    "total_steps": data.get("total_steps", 0),
+                    "dir": os.path.dirname(sf),
+                    "jammer_ids": jids,
+                })
 
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            src_manifest = json.load(f)
-
-        combinations = src_manifest.get("combinations", [])
         if not combinations:
-            raise ValueError(f"No combinations found in {manifest_path}")
+            raise FileNotFoundError(
+                f"No combinations or scenarios found in {self.input_sim_dir}. "
+                f"Ensure combinations_manifest.json or scenario folders exist."
+            )
 
         # Filter combinations by jammer criteria or combo_id
         filtered_combos = []
@@ -430,6 +466,13 @@ class IntermittentSimulator:
                 "source_sim_dir": self.input_sim_dir,
                 "combinations": out_combinations_manifest,
             }, jf, indent=2)
+
+        from utils.map_cleaning import copy_record
+        try:
+            rec = copy_record(self.radio_maps_dir, self.output_dir)
+            print(f"Propagated map cleaning record: {rec['method']}")
+        except Exception:
+            pass
 
         print(f"\n==================================================================")
         print(f"Intermittent dataset successfully created at: {self.output_dir}")
@@ -785,6 +828,14 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default=None,
+        help="Root dataset directory from main_batch_cluster.py (e.g. ./datasets/batch_simulation_nyc). "
+             "When provided, defaults for --input-sim-dir, --radio-maps-dir, and --trajectories-dir "
+             "derive automatically from it.",
+    )
+    parser.add_argument(
         "--generate-snapshot",
         action="store_true",
         help="Generate 6-panel overview snapshot for intermittent simulations.",
@@ -795,6 +846,22 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Integrate dataset-dir paths if provided
+    if args.dataset_dir:
+        ds_root = os.path.abspath(args.dataset_dir)
+        if args.input_sim_dir == DEFAULT_SIM_DIR:
+            cand_sim = os.path.join(ds_root, "multi_trajectory_jammers")
+            if os.path.exists(cand_sim):
+                args.input_sim_dir = cand_sim
+        if args.radio_maps_dir is None:
+            cand_rm = os.path.join(ds_root, "single_trajectory_jammers", "radio_maps")
+            if os.path.exists(cand_rm):
+                args.radio_maps_dir = cand_rm
+        if args.trajectories_dir == DEFAULT_TRAJ_DIR:
+            cand_traj = os.path.join(ds_root, "single_trajectory_jammers")
+            if os.path.exists(cand_traj):
+                args.trajectories_dir = cand_traj
 
     # Preset shortcut
     if args.preset == "long_3jammers":
