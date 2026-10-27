@@ -42,7 +42,6 @@ sionna_rt_jamming/
 │   └── README.md                 # Full dataset generation documentation (DeepMTL / PMBM)
 │
 ├── TMLR/                         # TMLR publication workspace (Intermittent & dynamic tracking)
-│   ├── run_pipeline.sh           # Standalone tracking pipeline for SLURM
 │   └── generate_intermittent_simulations.py  # Generates intermittent (pulsing/burst) datasets
 │
 ├── core/                         # Simulation core
@@ -183,8 +182,18 @@ sbatch run_pipeline_gpu.sh
 sbatch run_pipeline_cpu.sh
 ```
 
-#### Option 3: Standalone Tracking Pipeline (TMLR)
-For generating multi-jammer tracking datasets with custom trajectory combinations in a single GPU job:
+#### Option 3: Standalone Tracking / Ad-hoc Generation (Direct CLI / Interactive GPU)
+For generating custom multi-jammer tracking datasets (e.g., curved trajectories with random combinations) without running the full two-stage split pipeline:
 ```bash
-sbatch TMLR/run_pipeline.sh
+# Direct execution (or within an interactive GPU session via srun):
+python main_batch_cluster.py \
+    --action all \
+    --mode curved \
+    --durations 30 60 90 \
+    --velocities 3 9 15 \
+    --count-per-combo 6 \
+    --num-combinations 100 \
+    --min-jammers 2 \
+    --max-jammers 5 \
+    --skip-gif
 ```
