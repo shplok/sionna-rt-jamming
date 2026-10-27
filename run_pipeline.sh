@@ -70,9 +70,9 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader ||
 # Run full pipeline: Generation + 2D Visualization + GPU Simulation
 # ------------------------------------------------------------------------------
 echo -e "\n=================================================================="
-echo "Running main_no_interactive.py with action=$ACTION, mode=$MODE..."
+echo "Running main_batch_cluster.py with action=$ACTION, mode=$MODE..."
 echo "=================================================================="
-"$PYTHON_EXEC" main_no_interactive.py \
+"$PYTHON_EXEC" main_batch_cluster.py \
     --action "$ACTION" \
     --mode "$MODE" \
     --mesh-dir ./data/NYC3KM_585751_4512036/mesh \

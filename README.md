@@ -125,7 +125,9 @@ holding a GPU reservation through the CPU half would waste it.
 | Path | Role |
 |---|---|
 | `main_interactive_local.py` | **Local** entry point: GUI path planning + simulation |
-| `main_batch_cluster.py` | **Cluster** entry point: CLI, all dataset stages |
+| `main_batch_cluster.py` | **Cluster** entry point: CLI, all dataset stages (unified pipeline; absorbs former `main_no_interactive.py`) |
+| `paths_config.py` | Centralized multi-cluster environment & storage path auto-detection |
+| `run_pipeline.sh` | Unified single-script SLURM pipeline (straight / curved tracking scenarios) |
 | `requirements_local.txt` | Laptop / CPU deps — what the repo actually imports |
 | `requirements_cluster.txt` | Cluster deps — full `pip freeze`, Linux + CUDA 12.4 only |
 | `submit.sh` | Site-aware wrapper: `./submit.sh {show,verify,smoke,gpu,cpu}` |

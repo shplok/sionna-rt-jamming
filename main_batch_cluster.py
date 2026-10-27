@@ -45,6 +45,7 @@ import time
 import glob
 import argparse
 import numpy as np
+import paths_config
 
 # Thermal noise floor added before every dB conversion (and used by the map cleaning)
 NOISE_FLOOR_WATTS = 8e-15
@@ -64,6 +65,8 @@ def setup_mitsuba_variant(preferred="cuda_ad_mono_polarized"):
 # CLI Arguments
 # -----------------------------------------------------------------------------
 def parse_args():
+    scene_defs = paths_config.get_scene_defaults()
+
     parser = argparse.ArgumentParser(
         description="Unified non-interactive pipeline for trajectory generation and Sionna RT simulation."
     )
@@ -71,52 +74,50 @@ def parse_args():
         "--action",
         type=str,
         choices=["all", "generate_static", "simulate_static", "aggregate_static",
-                 "generate", "plot", "simulate_bases", "aggregate",
+                 "generate", "plot", "simulate_bases", "aggregate", "simulate",
                  "init_static_ranges", "merge_static_ranges"],
         default="all",
         help="Pipeline stage. DETECTION branch: generate_static -> simulate_static [GPU] "
              "-> aggregate_static. TRACKING branch: generate -> plot -> simulate_bases [GPU] "
-             "-> aggregate. Only the two simulate_* stages need a GPU; everything "
-             "else is CPU. 'all' runs the tracking branch only - run the static stages "
-             "explicitly. To split simulate_static over several GPU jobs: "
-             "init_static_ranges, then simulate_static --static-range per job, then "
-             "merge_static_ranges (both CPU).",
+             "-> aggregate (or simulate = simulate_bases + aggregate). 'all' runs the tracking branch only. "
+             "To split simulate_static over several GPU jobs: init_static_ranges, then "
+             "simulate_static --static-range per job, then merge_static_ranges.",
     )
     # Scene and Paths
     parser.add_argument(
         "--scene-path",
         type=str,
-        default="./data/NYC3KM_585751_4512036/simple_OSM_scene.xml",
-        help="Path to Mitsuba XML scene file.",
+        default=scene_defs["scene_path"],
+        help=f"Path to Mitsuba XML scene file (default: {scene_defs['scene_path']}).",
     )
     parser.add_argument(
         "--mesh-dir",
         type=str,
-        default="./data/NYC3KM_585751_4512036/mesh",
-        help="Path to building mesh directory.",
+        default=scene_defs["mesh_dir"],
+        help=f"Path to building mesh directory (default: {scene_defs['mesh_dir']}).",
     )
     parser.add_argument(
         "--dataset-dir",
         type=str,
-        default="./datasets/batch_simulation_nyc",
-        help="Dataset root. By convention ./datasets/batch_simulation_<tag>. Every other "
-             "path derives from it: single_trajectory_jammers/, single_static_jammers/, "
-             "multi_trajectory_jammers/, multi_static_jammers/, splits.json, labels/, "
-             "sensors/.",
+        default=None,
+        help="Dataset root. By convention ./datasets/batch_simulation_<tag>. When provided, "
+             "every other path derives from it: single_trajectory_jammers/, single_static_jammers/, "
+             "multi_trajectory_jammers/, multi_static_jammers/, splits.json, labels/, sensors/. "
+             "When omitted, paths_config scratch defaults are used.",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
         help="Override for the trajectory base library "
-             "(default: <dataset-dir>/single_trajectory_jammers).",
+             "(default: <dataset-dir>/single_trajectory_jammers or paths_config.get_trajectories_dir()).",
     )
     parser.add_argument(
         "--sim-output-dir",
         type=str,
         default=None,
         help="Override for the tracking scenarios "
-             "(default: <dataset-dir>/multi_trajectory_jammers).",
+             "(default: <dataset-dir>/multi_trajectory_jammers or paths_config.get_sim_results_dir()).",
     )
     parser.add_argument(
         "--splits",
@@ -146,7 +147,38 @@ def parse_args():
              "Positions are continuously jittered inside street cells - never at cell "
              "centres, or the sub-cell regression target would be degenerate.",
     )
-    # Multi-Jammer Combination Parameters
+    # Multi-Jammer Combination Parameters (Random Mode)
+    parser.add_argument(
+        "--num-combinations",
+        type=int,
+        default=None,
+        help="Number of multi-jammer combinations to aggregate in random mode. "
+             "If specified, dynamic random aggregation runs instead of splits-based aggregation.",
+    )
+    parser.add_argument(
+        "--min-jammers",
+        type=int,
+        default=2,
+        help="Minimum number of simultaneous jammers per random combination (default: 2).",
+    )
+    parser.add_argument(
+        "--max-jammers",
+        type=int,
+        default=10,
+        help="Maximum number of simultaneous jammers per random combination (default: 10).",
+    )
+    parser.add_argument(
+        "--skip-gif",
+        action="store_true",
+        help="Options: omitted/default (generate GIF animations for combinations) or flag provided (skip GIF animations).",
+    )
+    parser.add_argument(
+        "--sim-trajectories",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Specific trajectory .npy files to simulate. If None, simulates all found.",
+    )
     # Trajectory Generation Parameters
     parser.add_argument(
         "--durations",
@@ -331,8 +363,8 @@ def check_cleaning_args(args):
         if not 0 <= a < b:
             raise SystemExit(f"--static-range needs 0 <= START < END, got {a} {b}.")
     if args.traj_shard is not None:
-        if args.action != "simulate_bases":
-            raise SystemExit("--traj-shard is for --action simulate_bases only.")
+        if args.action not in ("simulate_bases", "simulate"):
+            raise SystemExit("--traj-shard is for --action simulate_bases or simulate only.")
         i, n = args.traj_shard
         if not (n >= 1 and 0 <= i < n):
             raise SystemExit(f"--traj-shard needs N >= 1 and 0 <= I < N, got {i} {n}.")
@@ -350,22 +382,38 @@ def cleaning_config(args):
 
 
 def resolve_dataset_paths(args):
-    """Derive the dataset sub-paths from --dataset-dir unless explicitly overridden."""
-    root = os.path.normpath(args.dataset_dir)
-    name = os.path.basename(root)
-    if not name.startswith("batch_simulation_"):
-        print(f"[warn] dataset dir '{name}' does not follow the batch_simulation_<tag> "
-              f"convention; continuing anyway.")
-    if args.output_dir is None:
-        args.output_dir = os.path.join(root, "single_trajectory_jammers")
-    if args.sim_output_dir is None:
-        args.sim_output_dir = os.path.join(root, "multi_trajectory_jammers")
-    if args.splits is None:
-        args.splits = os.path.join(root, "splits.json")
-    if args.static_dir is None:
-        args.static_dir = os.path.join(root, "single_static_jammers")
-    if args.multi_static_dir is None:
-        args.multi_static_dir = os.path.join(root, "multi_static_jammers")
+    """Derive the dataset sub-paths from --dataset-dir or paths_config unless explicitly overridden."""
+    if args.dataset_dir is None and args.output_dir is None and args.sim_output_dir is None:
+        args.dataset_dir = os.path.join(paths_config.get_dataset_root(), "batch_simulation_nyc")
+
+    if args.dataset_dir is not None:
+        root = os.path.normpath(args.dataset_dir)
+        name = os.path.basename(root)
+        if not name.startswith("batch_simulation_"):
+            print(f"[warn] dataset dir '{name}' does not follow the batch_simulation_<tag> "
+                  f"convention; continuing anyway.")
+        if args.output_dir is None:
+            args.output_dir = os.path.join(root, "single_trajectory_jammers")
+        if args.sim_output_dir is None:
+            args.sim_output_dir = os.path.join(root, "multi_trajectory_jammers")
+        if args.splits is None:
+            args.splits = os.path.join(root, "splits.json")
+        if args.static_dir is None:
+            args.static_dir = os.path.join(root, "single_static_jammers")
+        if args.multi_static_dir is None:
+            args.multi_static_dir = os.path.join(root, "multi_static_jammers")
+    else:
+        # Fallback to paths_config defaults for output_dir and sim_output_dir
+        if args.output_dir is None:
+            args.output_dir = paths_config.get_trajectories_dir()
+        if args.sim_output_dir is None:
+            args.sim_output_dir = paths_config.get_sim_results_dir()
+        if args.splits is None:
+            args.splits = os.path.join(args.output_dir, "splits.json")
+        if args.static_dir is None:
+            args.static_dir = os.path.join(paths_config.get_scratch_base_dir(), "single_static_jammers")
+        if args.multi_static_dir is None:
+            args.multi_static_dir = os.path.join(paths_config.get_scratch_base_dir(), "multi_static_jammers")
     return args
 
 
@@ -402,57 +450,100 @@ def run_generation(args, engine):
 
     for travel_dist, dur, vel in combos:
         print(f"\n--- Combination: {dur}s @ {vel}m/s (travel dist: {travel_dist:.1f}m) ---")
-        corridors = generator.find_straight_street_corridors(
-            required_distance=travel_dist,
-            num_corridors=args.count_per_combo,
-            z_height=args.z_height,
-            min_separation=25.0,
-            max_attempts=40000,
-            existing_trajectories=global_accepted,
-            max_overlap_ratio=args.max_overlap_ratio,
-            proximity_threshold=args.proximity_threshold,
-        )
-
-        for i in range(len(corridors)):
-            traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
-            start_p, heading_deg = corridors[i]
-
-            spec = TrajectorySpec(
+        if args.mode == "curved":
+            results = generator.find_curved_trajectories(
                 duration=dur,
                 velocity=vel,
+                num_trajectories=args.count_per_combo,
                 time_step=args.time_step,
-                mode=args.mode,
-                start_pos=start_p,
-                heading_deg=heading_deg,
                 z_height=args.z_height,
-                inclusive_end=False,
-                name=traj_id,
-                extra_metadata={
-                    "scene": "NYC3KM_585751_4512036",
-                    "index_in_combo": i,
-                    "max_overlap_ratio_allowed": args.max_overlap_ratio,
-                },
+                min_separation=25.0,
+                max_attempts=8000,
+                existing_trajectories=global_accepted,
+                max_overlap_ratio=args.max_overlap_ratio,
+                proximity_threshold=args.proximity_threshold,
+            )
+            for i, (traj_arr, metadata) in enumerate(results):
+                traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
+                metadata["name"] = traj_id
+                metadata["scene"] = "NYC3KM_585751_4512036"
+                metadata["index_in_combo"] = i
+                metadata["max_overlap_ratio_allowed"] = args.max_overlap_ratio
+
+                npy_path, _ = save_trajectory(args.output_dir, traj_id, traj_arr, metadata, save_json=False)
+                global_accepted.append(traj_arr)
+
+                manifest_entries.append({
+                    "id": traj_id,
+                    "duration_s": dur,
+                    "velocity_mps": vel,
+                    "num_frames": int(traj_arr.shape[0]),
+                    "travel_distance_m": float(metadata["total_distance_meters"]),
+                    "start_pos": metadata["start_position"],
+                    "end_pos": metadata["end_position"],
+                    "heading_deg": float(metadata.get("heading_degrees", 0.0)),
+                    "is_collision_free": bool(metadata["is_collision_free"]),
+                    "curve_type": metadata.get("curve_type", "curved"),
+                    "npy_file": os.path.basename(npy_path),
+                    "kinematics": metadata.get("kinematics", {}),
+                })
+                generated_count += 1
+                print(f"  [{generated_count:02d}/{total_expected}] {traj_id} ({metadata.get('curve_type', 'curved')}): "
+                      f"shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK "
+                      f"(overlap <= {args.max_overlap_ratio * 100:.0f}%)")
+        else:
+            corridors = generator.find_straight_street_corridors(
+                required_distance=travel_dist,
+                num_corridors=args.count_per_combo,
+                z_height=args.z_height,
+                min_separation=25.0,
+                max_attempts=40000,
+                existing_trajectories=global_accepted,
+                max_overlap_ratio=args.max_overlap_ratio,
+                proximity_threshold=args.proximity_threshold,
             )
 
-            traj_arr, metadata = generator.generate_straight(spec)
-            npy_path, _ = save_trajectory(args.output_dir, traj_id, traj_arr, metadata, save_json=False)
-            global_accepted.append(traj_arr)
+            for i in range(len(corridors)):
+                traj_id = f"traj_dur{int(dur)}s_vel{int(vel):02d}mps_{i:02d}"
+                start_p, heading_deg = corridors[i]
 
-            manifest_entries.append({
-                "id": traj_id,
-                "duration_s": dur,
-                "velocity_mps": vel,
-                "num_frames": int(traj_arr.shape[0]),
-                "travel_distance_m": float(metadata["total_distance_meters"]),
-                "start_pos": metadata["start_position"],
-                "end_pos": metadata["end_position"],
-                "heading_deg": float(metadata["heading_degrees"]),
-                "is_collision_free": bool(metadata["is_collision_free"]),
-                "npy_file": os.path.basename(npy_path),
-                "kinematics": metadata.get("kinematics", {}),
-            })
-            generated_count += 1
-            print(f"  [{generated_count:02d}/{total_expected}] {traj_id}: shape={traj_arr.shape}, dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= 75%)")
+                spec = TrajectorySpec(
+                    duration=dur,
+                    velocity=vel,
+                    time_step=args.time_step,
+                    mode=args.mode,
+                    start_pos=start_p,
+                    heading_deg=heading_deg,
+                    z_height=args.z_height,
+                    inclusive_end=False,
+                    name=traj_id,
+                    extra_metadata={
+                        "scene": "NYC3KM_585751_4512036",
+                        "index_in_combo": i,
+                        "max_overlap_ratio_allowed": args.max_overlap_ratio,
+                    },
+                )
+
+                traj_arr, metadata = generator.generate_straight(spec)
+                npy_path, _ = save_trajectory(args.output_dir, traj_id, traj_arr, metadata, save_json=False)
+                global_accepted.append(traj_arr)
+
+                manifest_entries.append({
+                    "id": traj_id,
+                    "duration_s": dur,
+                    "velocity_mps": vel,
+                    "num_frames": int(traj_arr.shape[0]),
+                    "travel_distance_m": float(metadata["total_distance_meters"]),
+                    "start_pos": metadata["start_position"],
+                    "end_pos": metadata["end_position"],
+                    "heading_deg": float(metadata.get("heading_degrees", 0.0)),
+                    "is_collision_free": bool(metadata["is_collision_free"]),
+                    "npy_file": os.path.basename(npy_path),
+                    "kinematics": metadata.get("kinematics", {}),
+                })
+                generated_count += 1
+                print(f"  [{generated_count:02d}/{total_expected}] {traj_id}: shape={traj_arr.shape}, "
+                      f"dist={metadata['total_distance_meters']:.1f}m -> OK (overlap <= {args.max_overlap_ratio * 100:.0f}%)")
 
     # Save manifest
     manifest_path = os.path.join(args.output_dir, "trajectories_manifest.json")
@@ -540,7 +631,7 @@ def run_plot(args, obstacles):
         ax.scatter(traj[0, 0], traj[0, 1], color="#00ff66", s=15, zorder=4)
         ax.scatter(traj[-1, 0], traj[-1, 1], color="#ff3333", s=15, marker="s", zorder=4)
 
-    ax.set_title("NYC 3KM - Generated Single Jammer Trajectories (Collision-Free, Overlap <= 75%)", color="#ffffff", fontsize=13, pad=12)
+    ax.set_title(f"NYC 3KM - Generated Single Jammer {args.mode.capitalize()} Trajectories (Collision-Free, Overlap <= {int(args.max_overlap_ratio * 100)}%)", color="#ffffff", fontsize=13, pad=12)
     ax.set_xlabel("X (meters)", color="#cccccc")
     ax.set_ylabel("Y (meters)", color="#cccccc")
     ax.tick_params(colors="#cccccc")
@@ -620,7 +711,19 @@ def run_base_simulations(args, obstacles):
     rm_solver = RadioMapSolver()
     tx_power_dbm = args.power_dbw + 30.0
 
-    traj_files = sorted(glob.glob(os.path.join(args.output_dir, "traj_*.npy")))
+    if args.sim_trajectories:
+        traj_files = []
+        for t in args.sim_trajectories:
+            p = t if os.path.isabs(t) else os.path.join(args.output_dir, t)
+            if not p.endswith(".npy"):
+                p += ".npy"
+            if os.path.exists(p):
+                traj_files.append(p)
+            else:
+                print(f"[warn] Specified trajectory not found: {p}")
+        traj_files.sort()
+    else:
+        traj_files = sorted(glob.glob(os.path.join(args.output_dir, "traj_*.npy")))
     if not traj_files:
         raise FileNotFoundError(f"No single jammer trajectories found in {args.output_dir}")
     if args.traj_shard is not None:
@@ -885,6 +988,207 @@ def run_aggregation_from_splits(args):
     rec = copy_record(radio_maps_dir, args.sim_output_dir)
     print(f"\nWrote {written} scenarios under {args.sim_output_dir} (map cleaning: "
           f"{rec['method']})")
+
+
+def run_aggregation_random(args, obstacles):
+    """Aggregate multi-jammer combinations dynamically without splits.json.
+
+    Draws random subsets of base radio maps (size K between min_jammers and max_jammers),
+    sums them linearly in Watts, and optionally renders GIF animations.
+    """
+    from utils.plotter import create_jammer_animation
+
+    num_combos = args.num_combinations if args.num_combinations is not None else 100
+    print("\n" + "=" * 70)
+    print(f"AGGREGATING {num_combos} RANDOM MULTI-JAMMER COMBINATIONS ({args.min_jammers}-{args.max_jammers} JAMMERS)")
+    print("=" * 70)
+
+    radio_maps_dir = os.path.join(args.output_dir, "radio_maps")
+    manifest_path = os.path.join(radio_maps_dir, "radio_maps_manifest.json")
+
+    if not os.path.exists(manifest_path):
+        raise FileNotFoundError(
+            f"Base radio maps manifest not found in {radio_maps_dir}. "
+            "Please run with '--action simulate_bases' first."
+        )
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    base_entries = manifest["radio_maps"]
+
+    if len(base_entries) < args.min_jammers:
+        raise ValueError(f"Not enough base radio maps ({len(base_entries)}) for min_jammers ({args.min_jammers})")
+
+    os.makedirs(args.sim_output_dir, exist_ok=True)
+    rng = np.random.default_rng(args.seed)
+
+    # Pre-load base radio maps (in Watts) into memory for instantaneous aggregation
+    print(f"Loading {len(base_entries)} base radio maps into RAM...")
+    loaded_maps = {}
+    for entry in base_entries:
+        w_path = os.path.join(radio_maps_dir, entry["watts_file"])
+        w_arr = np.load(w_path)
+        # Sanitize zero-distance antenna singularities (+inf / nan)
+        if not np.all(np.isfinite(w_arr)):
+            finite_mask = np.isfinite(w_arr)
+            max_finite = float(np.max(w_arr[finite_mask])) if np.any(finite_mask) else 10.0
+            w_arr = np.nan_to_num(w_arr, posinf=max_finite, neginf=0.0, nan=0.0)
+        loaded_maps[entry["traj_id"]] = w_arr
+
+    print(f"Pre-loaded {len(loaded_maps)} base radio maps. Generating {num_combos} combinations...")
+    t_agg_start = time.time()
+    combinations_manifest = []
+
+    b = args.map_bounds_b
+    map_bounds = {"x": [-b, b], "y": [-b, b], "z": [1.5, 1.5]}
+    map_center = [0.0, 0.0, 1.5]
+    map_size = (2 * b, 2 * b)
+
+    precision_map = {
+        "float16": np.float16,
+        "fp16": np.float16,
+        "float32": np.float32,
+        "fp32": np.float32,
+        "float64": np.float64,
+        "fp64": np.float64,
+    }
+    target_dtype = precision_map.get(args.precision.lower(), np.float16)
+
+    for c in range(num_combos):
+        K = int(rng.integers(args.min_jammers, args.max_jammers + 1))
+        K = min(K, len(base_entries))
+
+        chosen_indices = rng.choice(len(base_entries), size=K, replace=False)
+        chosen_entries = [base_entries[i] for i in chosen_indices]
+
+        # Max steps across chosen jammers in this combination
+        max_steps = max(e["num_steps"] for e in chosen_entries)
+        H, W = loaded_maps[chosen_entries[0]["traj_id"]].shape[1:]
+
+        combo_id = f"combo_{c:04d}_k{K:02d}"
+        combo_dir = os.path.join(args.sim_output_dir, combo_id)
+        os.makedirs(combo_dir, exist_ok=True)
+
+        # Incoherent linear addition in Watts: P_agg = sum(P_k)
+        agg_watts = np.zeros((max_steps, H, W), dtype=np.float32)
+
+        jammers_meta = []
+        for j_idx, entry in enumerate(chosen_entries):
+            tid = entry["traj_id"]
+            watts_data = loaded_maps[tid]
+            cur_steps = len(watts_data)
+            pad_amount = max_steps - cur_steps
+
+            if pad_amount > 0:
+                # pad_end: stationary at destination
+                pad = np.tile(watts_data[-1:], (pad_amount, 1, 1))
+                padded_watts = np.vstack([watts_data, pad])
+            else:
+                padded_watts = watts_data
+
+            agg_watts += padded_watts[:max_steps]
+
+            jname = f"Jammer{j_idx + 1}"
+            jammers_meta.append({
+                "jammer_index": j_idx,
+                "jammer_name": jname,
+                "traj_id": tid,
+                "original_steps": cur_steps,
+                "padded_steps": pad_amount,
+            })
+
+        # Apply noise floor equation: agg_dbw = 10 * log10(P_agg_watts + NOISE_FLOOR_WATTS)
+        agg_dbw_f32 = 10.0 * np.log10(agg_watts + NOISE_FLOOR_WATTS)
+        if not np.all(np.isfinite(agg_dbw_f32)):
+            finite_dbw = agg_dbw_f32[np.isfinite(agg_dbw_f32)]
+            max_dbw_finite = float(np.max(finite_dbw)) if len(finite_dbw) > 0 else 40.0
+            agg_dbw_f32 = np.nan_to_num(agg_dbw_f32, posinf=max_dbw_finite, neginf=-141.0, nan=-141.0)
+
+        if args.meas_noise_var > 0.0:
+            agg_dbw_f32 += rng.normal(0.0, math.sqrt(args.meas_noise_var), size=agg_dbw_f32.shape).astype(np.float32)
+
+        agg_dbw = agg_dbw_f32.astype(target_dtype)
+        np.save(os.path.join(combo_dir, "rss_aggregated.npy"), agg_dbw)
+
+        summary = {
+            "combination_id": combo_id,
+            "combo_index": c,
+            "num_jammers": K,
+            "total_steps": max_steps,
+            "dtype": str(agg_dbw.dtype),
+            "min_dbw": float(agg_dbw.min()),
+            "max_dbw": float(agg_dbw.max()),
+            "noise_floor_watts": NOISE_FLOOR_WATTS,
+            "meas_noise_var_db": args.meas_noise_var,
+            "jammers": jammers_meta,
+        }
+        with open(os.path.join(combo_dir, "combination_summary.json"), "w", encoding="utf-8") as sf:
+            json.dump(summary, sf, indent=2)
+
+        # Generate sample GIF for combination if skip_gif is not set
+        if not args.skip_gif:
+            if obstacles is None:
+                from utils.scene_objects import gather_bboxes
+                obstacles = gather_bboxes(args.mesh_dir, footprints=True, use_cache=True)
+            gif_path = os.path.join(combo_dir, "jammer_animation.gif")
+            from core.engine import MotionEngine
+            engine = MotionEngine(scene=None, obstacles=obstacles, bounds=map_bounds)
+            for j_idx, jmeta in enumerate(jammers_meta):
+                tarr = np.load(os.path.join(args.output_dir, f"{jmeta['traj_id']}.npy"))
+                engine._jammer_paths[f"Jammer_{j_idx+1}"] = tarr
+                engine._padding_preferences[f"Jammer_{j_idx+1}"] = "pad_end"
+            engine.finalize_trajectories()
+
+            create_jammer_animation(
+                rss_list=agg_dbw.astype(np.float32),
+                paths_dict=engine._jammer_paths,
+                buildings=obstacles,
+                map_size=map_size,
+                map_center=map_center,
+                filename=gif_path,
+            )
+            print(f"  [{c+1}/{num_combos}] {combo_id}: animation saved to {gif_path}")
+
+        combinations_manifest.append({
+            "combo_id": combo_id,
+            "index": c,
+            "num_jammers": K,
+            "total_steps": max_steps,
+            "dir": combo_dir,
+            "jammer_ids": [m["traj_id"] for m in jammers_meta],
+        })
+
+        if (c + 1) % 100 == 0 or c == num_combos - 1:
+            print(f"  Aggregated {c + 1}/{num_combos} combinations...", end="\r", flush=True)
+
+    agg_total_time = time.time() - t_agg_start
+    print(f"\nGenerated {num_combos} combinations in {agg_total_time:.2f}s ({num_combos / max(agg_total_time, 1e-4):.1f} combos/s)!")
+
+    with open(os.path.join(args.sim_output_dir, "combinations_manifest.json"), "w", encoding="utf-8") as cf:
+        json.dump({
+            "total_combinations": num_combos,
+            "min_jammers": args.min_jammers,
+            "max_jammers": args.max_jammers,
+            "combinations": combinations_manifest,
+        }, cf, indent=2)
+
+    from utils.map_cleaning import copy_record
+    rec = copy_record(radio_maps_dir, args.sim_output_dir)
+    print(f"All aggregated combinations saved in: {args.sim_output_dir} (map cleaning: {rec['method']})")
+
+
+def run_aggregation(args, obstacles=None):
+    """Dispatch aggregation to either dataset splits-based or dynamic random combinations."""
+    if args.num_combinations is not None:
+        print(f"[Aggregation] --num-combinations={args.num_combinations} specified -> using random combinations mode.")
+        run_aggregation_random(args, obstacles)
+    elif os.path.exists(args.splits):
+        print(f"[Aggregation] Found {args.splits} -> using dataset splits mode.")
+        run_aggregation_from_splits(args)
+    else:
+        print(f"[Aggregation] splits.json not found at {args.splits} -> defaulting to random combinations (100 combos).")
+        args.num_combinations = 100
+        run_aggregation_random(args, obstacles)
 
 
 # -----------------------------------------------------------------------------
@@ -1324,14 +1628,13 @@ def main():
     print("=" * 70)
     print(f"Action requested: {args.action.upper()}")
 
-    # Building meshes are only needed for trajectory generation, plotting, ray tracing
-    # and ray tracing. 'aggregate' is pure NumPy over precomputed maps,
-    # so skip the load (and the trimesh dependency) entirely for it.
     # Building meshes are needed for trajectory generation, plotting, ray tracing and
-    # static placement, but not for the two pure-NumPy combination stages.
+    # static placement, but not for pure-NumPy combinations (unless rendering GIFs).
+    need_obstacles = args.action in ("all", "generate", "plot", "simulate_bases", "simulate") or \
+                     (args.action == "aggregate" and args.num_combinations is not None and not args.skip_gif)
+
     obstacles, engine = None, None
-    if args.action not in ("aggregate", "aggregate_static", "simulate_static",
-                           "generate_static", "init_static_ranges", "merge_static_ranges"):
+    if need_obstacles:
         t0 = time.time()
         from utils.scene_objects import gather_bboxes
         from core.engine import MotionEngine
@@ -1368,11 +1671,11 @@ def main():
     if args.action in ["all", "plot"]:
         run_plot(args, obstacles)
 
-    if args.action in ["all", "simulate_bases"]:
+    if args.action in ["all", "simulate_bases", "simulate"]:
         run_base_simulations(args, obstacles)
 
-    if args.action in ["all", "aggregate"]:
-        run_aggregation_from_splits(args)
+    if args.action in ["all", "aggregate", "simulate"]:
+        run_aggregation(args, obstacles)
 
     print("\n" + "=" * 70)
     print(f"Action '{args.action}' completed successfully!")
